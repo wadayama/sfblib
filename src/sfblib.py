@@ -910,8 +910,6 @@ def linear_gaussian_closed_forms(A: torch.Tensor, P: float, t: float) -> Dict[st
     return {"I": I, "J": J}
 
 
-
-
 # -----------------------------------------------------------------------------
 # Backward-compat thin wrappers (optional). These call the generic trainer.
 # -----------------------------------------------------------------------------
@@ -994,6 +992,114 @@ def train_dsm_conditional_task(
         lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
     )
     return model
+# -----------------------------------------------------------------------------
+# KDE-LOO Mutual Information (Gaussian kernel) - reusable baseline
+# Implements Eq. (50) for Y_t = W + sqrt(t) Z with a Gaussian kernel.
+# This baseline is used in Fig.6 (tanh channel).
+# -----------------------------------------------------------------------------
+
+@torch.no_grad()
+def _pairwise_sq_dists(y: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    """
+    Full pairwise squared distances ||y_i - w_j||^2, shape (N,N).
+    """
+    y2 = (y**2).sum(dim=1, keepdim=True)
+    w2 = (w**2).sum(dim=1, keepdim=True).T
+    return y2 + w2 - 2.0 * (y @ w.T)
+
+
+@torch.no_grad()
+def mi_kde_loo_gaussian_pairs(
+    w: torch.Tensor, y: torch.Tensor, t: float, *, chunk: Optional[int] = None
+) -> float:
+    """
+    KDE-LOO estimator of I(W; Y_t) with a Gaussian kernel (Eq. (50)).
+
+    Parameters
+    ----------
+    w : (N, m)  clean outputs W = f(X)
+    y : (N, m)  noisy outputs Y_t = W + sqrt(t) * Z
+    t : float    noise variance
+    chunk : Optional[int]
+        If None or chunk >= N: builds a full (N x N) log-kernel matrix and
+        uses logsumexp (fast but O(N^2) memory).
+        If a positive int: runs a memory-safe streaming log-sum-exp across
+        column blocks of size `chunk` (O(N^2) time, low memory).
+
+    Returns
+    -------
+    float : estimated MI [nats]
+    """
+    device = y.device
+    N, m = y.shape
+    assert w.shape == y.shape
+    t = float(t)
+
+    # term1 = -||y_i - w_i||^2 / (2t)
+    d_ii = (y - w).pow(2).sum(dim=1).double()
+    term1 = - d_ii / (2.0 * t)
+
+    # Full matrix route
+    if chunk is None or (chunk >= N):
+        D = _pairwise_sq_dists(y.double(), w.double())     # (N,N)
+        S = - D / (2.0 * t)                                # log kernel
+        idx = torch.arange(N, device=device)
+        S[idx, idx] = -float("inf")                        # LOO
+        logsum = torch.logsumexp(S, dim=1) - math.log(N - 1)
+        term2 = - logsum
+        return float((term1 + term2).mean().item())
+
+    # Streaming route (rows in blocks, columns in chunks)
+    Iblock = min(1024, N)
+    vals = []
+    for i0 in range(0, N, Iblock):
+        i1 = min(i0 + Iblock, N)
+        y_blk = y[i0:i1].double()
+        Bi = y_blk.shape[0]
+        m_row = torch.full((Bi,), -float("inf"), dtype=torch.float64, device=device)
+        s_row = torch.zeros(Bi, dtype=torch.float64, device=device)
+
+        for j0 in range(0, N, chunk):
+            j1 = min(j0 + chunk, N)
+            w_blk = w[j0:j1].double()
+            D = (y_blk.unsqueeze(1) - w_blk.unsqueeze(0)).pow(2).sum(dim=2)  # (Bi, Bj)
+            S_blk = - D / (2.0 * t)
+
+            # mask diagonal when row/col blocks overlap
+            if (i0 <= j1 - 1) and (j0 <= i1 - 1):
+                diag = torch.arange(max(i0, j0), min(i1, j1), device=device)
+                if len(diag) > 0:
+                    S_blk[(diag - i0), (diag - j0)] = -float("inf")
+
+            m_blk = torch.max(S_blk, dim=1).values
+            new_m = torch.maximum(m_row, m_blk)
+            s_row = s_row * torch.exp(m_row - new_m) + torch.sum(torch.exp(S_blk - new_m.unsqueeze(1)), dim=1)
+            m_row = new_m
+
+        logsum_blk = torch.log(s_row + 1e-300) + m_row - math.log(N - 1)
+        term2_blk = - logsum_blk
+        vals.append(term1[i0:i1] + term2_blk)
+
+    return float(torch.cat(vals, dim=0).mean().item())
+
+
+@torch.no_grad()
+def estimate_mi_kde_loo(
+    sampler_x: Callable[[int, torch.device], torch.Tensor],
+    frontend: nn.Module,
+    t: float,
+    N: int,
+    device: torch.device,
+    *, chunk: Optional[int] = None
+) -> float:
+    """
+    High-level wrapper for KDE-LOO MI (Eq. (50)).  Samples (W,Y_t) forward and calls
+    `mi_kde_loo_gaussian_pairs`.  Intended for reuse in experiments (e.g., Fig.6 tanh channel).
+    """
+    x = sampler_x(N, device)
+    w = frontend.to(device)(x)
+    y = w + math.sqrt(float(t)) * torch.randn_like(w)
+    return mi_kde_loo_gaussian_pairs(w, y, float(t), chunk=chunk)
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -1024,4 +1130,6 @@ __all__ = [
     "integrate_mi_along_eta",
     # closed-form
     "gaussian_awgn_closed_forms", "linear_gaussian_closed_forms",
+    # KDE-LOO
+    "mi_kde_loo_gaussian_pairs", "estimate_mi_kde_loo",
 ]
