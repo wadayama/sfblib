@@ -11,6 +11,16 @@ PyTorch-based library for mutual information estimation and information gradient
 - **Information Bottleneck** optimization support
 - **GPU-Ready**: Automatically uses GPU when available
 
+## Paper References
+
+This library implements the methods described in:
+
+- **SFB/MI Estimation**: [arXiv:2510.05496v2](https://arxiv.org/abs/2510.05496v2)
+  *"Mutual Information Estimation via Score-to-Fisher Bridge for Nonlinear Gaussian Noise Channels"*
+
+- **Information Gradient**: [arXiv:2510.20179v1](https://arxiv.org/abs/2510.20179v1)
+  *"Information Gradient for Nonlinear Gaussian Channel with Applications to Task-Oriented Communication"*
+
 ## Installation
 
 Clone this repository and install dependencies:

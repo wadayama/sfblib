@@ -6,7 +6,13 @@
 # Theory mapping:
 #   - Information gradient: nabla_eta I(X; Yt) = -E[Df_eta(X)^T s_Yt(Yt)]
 #   - Fisher integral: I(X; YT) = (1/2) integral_T^inf [n/t - J(Yt)] dt
-#   - Score function learning via Denoising Score Matching (DSM)  
+#   - Score function learning via Denoising Score Matching (DSM)
+#
+# Paper References:
+#   - SFB/MI Estimation: arXiv:2510.05496v2
+#     "Mutual Information Estimation via Score-to-Fisher Bridge for Nonlinear Gaussian Noise Channels"
+#   - Information Gradient: arXiv:2510.20179v1
+#     "Information Gradient for Nonlinear Gaussian Channel with Applications to Task-Oriented Communication"
 #
 # MIT License - Copyright (c) 2025 Tadashi Wadayama
 # See LICENSE file for full license text.
