@@ -21,7 +21,7 @@ uv --version
 
 # Clone the repository
 git clone <repository-url>
-cd 2025-sfblib_new
+cd sfblib
 
 # Install dependencies using uv
 uv sync
