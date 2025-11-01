@@ -1,16 +1,12 @@
 
-# sfblib.py (refactored) — Score-to-Fisher & Information-Gradient Toolkit
+# sfblib.py (refactored) - Score-to-Fisher & Information-Gradient Toolkit
 # Single-file PyTorch library for MI estimation, score learning, and VJP-based information gradients.
 # Version: 0.2.0 (breaking changes allowed)
 #
-# Theory mapping (equations, pages):
-# - Fisher–integral of MI and log-domain trapezoid + tail correction: main.pdf Eq.(24),(43)–(45), Fig.2 p.6, p.7
-# - DSM losses (fixed-t, noise-conditional) and Fisher via score: main.pdf Eq.(27),(41),(8),(29),(42)
-# - Information gradient & VJP identity; stop-gradient; task/IB extensions; η-path integral: info_grad.pdf Eq.(10),(23),(25),(55),(67),(28)–(32)
-#
-# Please cite the two project papers when using this library.  (Markers used in API docs)
-#  main.pdf  →  fileciteturn0file0
-#  info_grad.pdf → fileciteturn0file1
+# Theory mapping:
+#   - Information gradient: nabla_eta I(X; Yt) = -E[Df_eta(X)^T s_Yt(Yt)]
+#   - Fisher integral: I(X; YT) = (1/2) integral_T^inf [n/t - J(Yt)] dt
+#   - Score function learning via Denoising Score Matching (DSM)  
 #
 # MIT License - Copyright (c) 2025 Tadashi Wadayama
 # See LICENSE file for full license text.
@@ -125,9 +121,9 @@ def _activation(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
 class FourierTEmbedding(nn.Module):
     """
     Gaussian Fourier features for scalar t (noise variance).
-    Produces a fixed-dim embedding φ(t) ∈ R^{2*D}.
+    Produces a fixed-dim embedding phi(t) in R^{2*D}.
 
-    Reference: common in diffusion models; here used for conditional DSM (main Eq.(41)). fileciteturn0file0
+    Reference: common in diffusion models; here used for conditional DSM (main Eq.(41)). 
     """
     def __init__(self, embed_dim: int = 32, scale: float = 10.0):
         super().__init__()
@@ -144,7 +140,7 @@ class FourierTEmbedding(nn.Module):
 
 class ScoreNetMLP(nn.Module):
     """
-    Unconditional score s(y) ≈ ∇_y log p_{Y_t}(y). DSM loss: main Eq.(27). fileciteturn0file0
+    Unconditional score s(y) ~ nabla__y log p_{Y_t}(y). DSM loss: main Eq.(27). 
     """
     def __init__(self, dim: int, hidden: int = 128, layers: int = 3, activation: str = "silu"):
         super().__init__()
@@ -163,7 +159,7 @@ class ScoreNetMLP(nn.Module):
 
 class NoiseCondScoreNet(nn.Module):
     """
-    Noise-conditional score s(y, t) (main Eq.(41)).  t is passed via Fourier embedding. fileciteturn0file0
+    Noise-conditional score s(y, t) (main Eq.(41)).  t is passed via Fourier embedding. 
     """
     def __init__(self, dim: int, hidden: int = 128, layers: int = 3, activation: str = "silu", t_embed_dim: int = 32):
         super().__init__()
@@ -189,7 +185,7 @@ class NoiseCondScoreNet(nn.Module):
 
 class CondTaskScoreNet(nn.Module):
     """
-    Conditional score s(y, τ) used for task-oriented objectives (info_grad Eq.(62)). fileciteturn0file1
+    Conditional score s(y, tau) used for task-oriented objectives (info_grad Eq.(62)). 
     """
     def __init__(self, y_dim: int, tau_dim: int, hidden: int = 128, layers: int = 3, activation: str = "silu"):
         super().__init__()
@@ -222,17 +218,17 @@ class DSMConfig:
     layers: int = 3
     activation: str = "silu"
     grad_clip: float = 1.0
-    scheme: str = "per_t"       # "per_t" or "noise_cond"  (main Eq.(41)) fileciteturn0file0
+    scheme: str = "per_t"       # "per_t" or "noise_cond"  (main Eq.(41)) 
     t_embed_dim: int = 32
     weight_decay: float = 0.0
-    stein_calibrate: bool = False   # Optional scale calibration at evaluation (info_grad §VII). fileciteturn0file1
+    stein_calibrate: bool = False   # Optional scale calibration at evaluation (info_grad Sec.VII). 
 
 @dataclass
 class LogGridConfig:
     t_min: float
     t_max: float
     m_points: int
-    T_lower: float             # lower limit T for MI integral (Eq.(24)); controls slice index in Eq.(44). fileciteturn0file0
+    T_lower: float             # lower limit T for MI integral (Eq.(24)); controls slice index in Eq.(44). 
 
 @dataclass
 class FisherConfig:
@@ -261,8 +257,8 @@ class AlternatingOptConfig:
 def dsm_loss_uncond(score: Callable[[torch.Tensor], torch.Tensor],
                     w: torch.Tensor, t: float, eps: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
-    DSM loss at fixed t (main Eq.(27)):  E || s(y) + ε/√t ||^2  with  y = w + √t ε.  fileciteturn0file0
-    Equivalent target: s(y) ≈ -(y - w)/t.
+    DSM loss at fixed t (main Eq.(27)):  E || s(y) + eps/sqrtt ||^2  with  y = w + sqrtt eps.  
+    Equivalent target: s(y) ~ -(y - w)/t.
     """
     B, m = w.shape
     if eps is None:
@@ -276,7 +272,7 @@ def dsm_loss_uncond(score: Callable[[torch.Tensor], torch.Tensor],
 def dsm_loss_noise_cond(score: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
                         w: torch.Tensor, t: torch.Tensor, eps: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
-    Noise-conditional DSM (main Eq.(41)):  E_t E || s(y,t) + ε/√t ||^2 .  t is vector-shaped.  fileciteturn0file0
+    Noise-conditional DSM (main Eq.(41)):  E_t E || s(y,t) + eps/sqrtt ||^2 .  t is vector-shaped.  
     """
     if eps is None:
         eps = torch.randn_like(w)
@@ -290,7 +286,7 @@ def dsm_loss_conditional(score: Callable[[torch.Tensor, torch.Tensor], torch.Ten
                          w: torch.Tensor, tau: torch.Tensor, t: float,
                          eps: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
-    Conditional DSM for s(y, τ) (info_grad Eq.(62)): noise is added only to y, not τ.  fileciteturn0file1
+    Conditional DSM for s(y, tau) (info_grad Eq.(62)): noise is added only to y, not tau.  
     """
     if eps is None:
         eps = torch.randn_like(w)
@@ -319,8 +315,8 @@ def train_score_generic(
 ) -> nn.Module:
     """
     Universal training loop for score models.
-    - If t is float  → fixed-t DSM (per-t)
-    - If t is (t_min, t_max) → noise-conditional DSM with log-uniform t
+    - If t is float   fixed-t DSM (per-t)
+    - If t is (t_min, t_max)  noise-conditional DSM with log-uniform t
 
     This function underlies the specialized wrappers below.
     """
@@ -366,7 +362,7 @@ def mc_expect(fn: Callable[[int], torch.Tensor], N: int, reduce: str = "mean", c
     """
     Compute E[ fn(B) ] by repeated chunk evaluation. fn returns a vector of size (B,) or (B,d).
 
-    MC error decays ~ O(N^{-1/2}).  (main §III-C; CLT remark after Eq.(29))  fileciteturn0file0
+    MC error decays ~ O(N^{-1/2}).  (main Sec.III-C; CLT remark after Eq.(29))  
     """
     acc = []
     done = 0
@@ -385,7 +381,7 @@ def fisher_from_score(
     chunk: int = 65536
 ) -> float:
     """
-    J(Y_t) = E || s(Y_t) ||^2, estimated by Monte Carlo.  (main Eq.(8),(29))  fileciteturn0file0
+    J(Y_t) = E || s(Y_t) ||^2, estimated by Monte Carlo.  (main Eq.(8),(29))  
     """
     @torch.no_grad()
     def _fn(B: int) -> torch.Tensor:
@@ -398,14 +394,14 @@ def fisher_from_score(
 
 def mmse_from_fisher(J: float, m: int, t: float) -> float:
     """
-    mmse(t) = m t - t^2 J(Y_t)  (main Eq.(23))  fileciteturn0file0
+    mmse(t) = m t - t^2 J(Y_t)  (main Eq.(23))  
     """
     return m * t - (t ** 2) * J
 
 
 def fisher_from_mmse(mmse: float, m: int, t: float) -> float:
     """
-    J(Y_t) = (m t - mmse(t)) / t^2  (rearranged main Eq.(23))  fileciteturn0file0
+    J(Y_t) = (m t - mmse(t)) / t^2  (rearranged main Eq.(23))  
     """
     return (m * t - mmse) / (t ** 2)
 
@@ -416,7 +412,7 @@ def fisher_from_mmse(mmse: float, m: int, t: float) -> float:
 
 def make_log_grid(cfg: LogGridConfig) -> np.ndarray:
     """
-    Geometric grid over [t_min, t_max] with M points (main Eq.(42)).  fileciteturn0file0
+    Geometric grid over [t_min, t_max] with M points (main Eq.(42)).  
     """
     t_min, t_max, M = cfg.t_min, cfg.t_max, cfg.m_points
     if t_min <= 0 or t_max <= 0 or t_max <= t_min:
@@ -426,7 +422,7 @@ def make_log_grid(cfg: LogGridConfig) -> np.ndarray:
 
 def log_trapz(u: np.ndarray, f_u: np.ndarray) -> float:
     """
-    Trapezoid rule on a *uniform u-grid*.  Used after u = log t change (main Eq.(43)→(44)).  fileciteturn0file0
+    Trapezoid rule on a *uniform u-grid*.  Used after u = log t change (main Eq.(43)(44)).  
     """
     if len(u) != len(f_u):
         raise ValueError("u and f(u) must have same length.")
@@ -438,7 +434,7 @@ def log_trapz(u: np.ndarray, f_u: np.ndarray) -> float:
 
 def tail_correction_covtrace(trace_cov_x: float, t_max: float) -> float:
     """
-    Universal tail ≈ 0.5 * tr Cov(X) / t_max (main Eq.(45)).  fileciteturn0file0
+    Universal tail ~ 0.5 * tr Cov(X) / t_max (main Eq.(45)).  
     """
     return 0.5 * (trace_cov_x / t_max)
 
@@ -452,7 +448,7 @@ def integrate_mi_log_trapz(
     trace_cov_x: Optional[float] = None
 ) -> float:
     """
-    MI via Fisher integral, evaluated in the *log domain* (main Eq.(43)→(44)), plus tail (Eq.(45)).  fileciteturn0file0
+    MI via Fisher integral, evaluated in the *log domain* (main Eq.(43)(44)), plus tail (Eq.(45)).  
     """
     t = np.asarray(t_vals, dtype=np.float64)
     J = np.asarray(J_vals, dtype=np.float64)
@@ -464,7 +460,7 @@ def integrate_mi_log_trapz(
     t, J = t[mask], J[mask]
 
     u = np.log(t)
-    # ℓ(u) = m - e^u J(e^u)    (derivation from Eq.(43))
+    # l(u) = m - e^u J(e^u)    (derivation from Eq.(43))
     ell = (dim_y - np.exp(u) * J)
 
     I_num = 0.5 * log_trapz(u, ell)
@@ -484,7 +480,7 @@ def integrate_mi_log_trapz(
 def estimate_trace_cov_x(sampler_x: Callable[[int, torch.device], torch.Tensor],
                          device: torch.device, samples: int = 50_000) -> float:
     """
-    Estimate tr Cov(X) from samples for tail correction (main Eq.(45)).  fileciteturn0file0
+    Estimate tr Cov(X) from samples for tail correction (main Eq.(45)).  
     """
     @torch.no_grad()
     def _fn(B: int) -> torch.Tensor:
@@ -509,7 +505,7 @@ def estimate_fisher_from_score(
     Wrapper for common pattern: J(Y_t) from a trained score model.
 
     If noise_conditional=True, `score(y, t)` is assumed. Otherwise `score(y)`.
-    Optionally apply Stein calibration scale to reduce global bias (info_grad §VII). fileciteturn0file1
+    Optionally apply Stein calibration scale to reduce global bias (info_grad Sec.VII). 
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend)
     channel.frontend = channel.frontend.to(device)
@@ -542,7 +538,7 @@ def estimate_mi_forward(
     conditional: str = "per_t"
 ) -> Dict[str, Any]:
     """
-    Full pipeline: DSM → Fisher → MI (main Eq.(24),(27),(29),(41),(43)–(45)).  fileciteturn0file0
+    Full pipeline: DSM  Fisher  MI (main Eq.(24),(27),(29),(41),(43)-(45)).  
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
     t_vals = make_log_grid(t_grid)
@@ -614,8 +610,8 @@ def stein_calibrate_scalar(score_eval: Callable[[torch.Tensor], torch.Tensor],
                            y_sampler: Callable[[int], torch.Tensor],
                            B: int = 8192) -> float:
     """
-    Estimate a scalar c so that E[ Y^T (c s(Y)) ] ≈ -m  (Gaussian Stein identity).
-    Applied as s̃ = c s to reduce global scale bias. (Used in info_grad experiments §VII)  fileciteturn0file1
+    Estimate a scalar c so that E[ Y^T (c s(Y)) ] ~ -m  (Gaussian Stein identity).
+    Applied as s~ = c s to reduce global scale bias. (Used in info_grad experiments Sec.VII)  
     """
     y = y_sampler(B)
     s = score_eval(y)
@@ -632,7 +628,7 @@ def stein_calibrate_scalar(score_eval: Callable[[torch.Tensor], torch.Tensor],
 
 def vjp_loss(frontend: nn.Module, vec_field: torch.Tensor, x: torch.Tensor, stop_grad: bool = True) -> torch.Tensor:
     """
-    L_vjp = ⟨ f_η(x), stop(v) ⟩;  ∇_η L_vjp = Df_η(x)^T v  (VJP identity, info_grad Eq.(23)).  fileciteturn0file1
+    L_vjp = < f_eta(x), stop(v) >;  nabla__eta L_vjp = Df_eta(x)^T v  (VJP identity, info_grad Eq.(23)).  
     """
     v = vec_field.detach() if stop_grad else vec_field
     return (frontend(x) * v).sum(dim=-1).mean()
@@ -656,8 +652,8 @@ def info_gradient(
     stein_calibrate: bool = False
 ) -> Tuple[float, Tuple[torch.Tensor, ...]]:
     """
-    ∇_η I(X;Y_t) = -E[ Df_η(X)^T s_Y(Y) ] via VJP (info_grad Eq.(10),(23),(25)).  fileciteturn0file1
-    Returns (Lvjp, grads) where -∇_η Lvjp = ∇_η I.
+    nabla__eta I(X;Y_t) = -E[ Df_eta(X)^T s_Y(Y) ] via VJP (info_grad Eq.(10),(23),(25)).  
+    Returns (Lvjp, grads) where -nabla__eta Lvjp = nabla__eta I.
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
     x, w, y = simulate_y(channel, t, batch_size, device)
@@ -695,7 +691,7 @@ def task_info_gradient(
     stein_calibrate: bool = False
 ) -> Tuple[float, Tuple[torch.Tensor, ...]]:
     """
-    ∇_η I(T;Y_t) = E[ Df_η^T ( s_{Y|T} - s_Y ) ] via VJP (info_grad Eq.(55)). fileciteturn0file1
+    nabla__eta I(T;Y_t) = E[ Df_eta^T ( s_{Y|T} - s_Y ) ] via VJP (info_grad Eq.(55)). 
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
     x, w, y = simulate_y(channel, t, batch_size, device)
@@ -736,7 +732,7 @@ def ib_gradient(
     stein_calibrate: bool = False
 ) -> Tuple[float, Tuple[torch.Tensor, ...]]:
     """
-    ∇_η [ I(T;Y_t) - β I(X;Y_t) ] (info_grad Eq.(67)). fileciteturn0file1
+    nabla__eta [ I(T;Y_t) - beta I(X;Y_t) ] (info_grad Eq.(67)). 
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
     x, w, y = simulate_y(channel, t, batch_size, device)
@@ -774,7 +770,7 @@ def alternating_optimize(
     task_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
 ) -> Iterable[Dict[str, Any]]:
     """
-    Alternating optimization (info_grad Algorithm structure).  Phase-1: DSM; Phase-2: η-update via VJP loss.  fileciteturn0file1
+    Alternating optimization (info_grad Algorithm structure).  Phase-1: DSM; Phase-2: eta-update via VJP loss.  
 
     Yields dicts: {"iter": k, "Lvjp": float, "loss": float}
     """
@@ -814,7 +810,7 @@ def alternating_optimize(
                 channel=channel, device=device, t=float(t), steps=alt.score_steps, batch_size=alt.batch_size,
                 lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
             )
-            # conditional DSM for s(y, τ)
+            # conditional DSM for s(y, tau)
             def _sampler_cond(xx: torch.Tensor) -> torch.Tensor:
                 return task_fn(xx)
             score_ct = train_score_generic(
@@ -824,7 +820,7 @@ def alternating_optimize(
                 lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
             )
 
-        # Phase 2: VJP loss and η update
+        # Phase 2: VJP loss and eta update
         if mode == "mi":
             Lvjp, _ = info_gradient(frontend, score, sampler_x, t, alt.batch_size, device, noise_conditional=False,
                                     stein_calibrate=dsm.stein_calibrate)
@@ -863,7 +859,7 @@ def alternating_optimize(
 
 
 # -----------------------------------------------------------------------------
-# Path-integral (η-direction) — optional advanced utility
+# Path-integral (eta-direction) - optional advanced utility
 # -----------------------------------------------------------------------------
 
 def integrate_mi_along_eta(
@@ -871,8 +867,8 @@ def integrate_mi_along_eta(
     params_seq: Iterable[Tuple[nn.Module, float]]
 ) -> float:
     """
-    Estimate I(η1) - I(η0) ≈ ∑ (I'(η_k) * Δη_k) via trapezoid over a piecewise-linear path in η.
-    (info_grad Eq.(28)–(32), path-integral route).  fileciteturn0file1
+    Estimate I(eta1) - I(eta0) ~ sum (I'(eta_k) * Deltaeta_k) via trapezoid over a piecewise-linear path in eta.
+    (info_grad Eq.(28)-(32), path-integral route).  
     `params_seq` is an iterable of (frontend_clone, scalar_position) with monotonically increasing positions.
     """
     vals = [(pos, grad_fn(model)) for (model, pos) in params_seq]
@@ -891,7 +887,7 @@ def integrate_mi_along_eta(
 
 def gaussian_awgn_closed_forms(P: float, n: int, t: float) -> Dict[str, float]:
     """
-    Closed forms for X~N(0,P I), Y=X+Z_t (main Eq.(30)–(32)).  fileciteturn0file0
+    Closed forms for X~N(0,P I), Y=X+Z_t (main Eq.(30)-(32)).  
     Returns dict with keys: I, J, mmse (nats).
     """
     I = 0.5 * n * math.log1p(P / t)
@@ -902,7 +898,7 @@ def gaussian_awgn_closed_forms(P: float, n: int, t: float) -> Dict[str, float]:
 
 def linear_gaussian_closed_forms(A: torch.Tensor, P: float, t: float) -> Dict[str, float]:
     """
-    Closed forms for Y = A X + Z_t, X~N(0,P I) (main Eq.(35)–(37)).  fileciteturn0file0
+    Closed forms for Y = A X + Z_t, X~N(0,P I) (main Eq.(35)-(37)).  
     Returns dict with keys: I, J (nats).
     """
     A = A.detach().cpu().double()
@@ -985,7 +981,7 @@ def train_dsm_conditional_task(
         return CondTaskScoreNet(y_dim=channel.y_dim or sampler_x(1, device).shape[1],
                                 tau_dim=tau_dim, hidden=dsm.hidden, layers=dsm.layers,
                                 activation=dsm.activation).to(device)
-    # create a closure to fetch τ=g(X) freshly every step
+    # create a closure to fetch tau=g(X) freshly every step
     def _loss_fn(mdl, w, tt):
         x_tmp = channel.sampler_x(w.shape[0], device)
         tau = task_fn(x_tmp)
