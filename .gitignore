@@ -30,6 +30,7 @@ Thumbs.db
 results/
 checkpoints/
 logs/
+*.pdf
 
 # Temporary files
 tmp/
