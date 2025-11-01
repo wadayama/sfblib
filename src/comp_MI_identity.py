@@ -1,9 +1,9 @@
 
-import math, torch
+import math
+import torch
 import numpy as np
-from sfblib import (
-    estimate_mi_forward, DSMConfig, LogGridConfig, FisherConfig, TailConfig
-)
+
+import sfblib as sfb
 
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -25,14 +25,14 @@ class Front(torch.nn.Module):
 # Log grid and estimator configs (as used in the papers)
 # T_lower is the lower integration limit in the Fisher integral
 T_lower = P / 200.0
-t_grid = LogGridConfig(t_min=T_lower, t_max=50.0 * P, m_points=12, T_lower=T_lower)
-dsm = DSMConfig(steps=300, batch_size=8192, lr=1e-3, grad_clip=1.0, activation="silu")
-fisher = FisherConfig(mc_samples=100_000)
-tail = TailConfig(use_tail=True, cov_trace_est_samples=50_000)
+t_grid = sfb.LogGridConfig(t_min=T_lower, t_max=50.0 * P, m_points=12, T_lower=T_lower)
+dsm = sfb.DSMConfig(steps=300, batch_size=8192, lr=1e-3, grad_clip=1.0, activation="silu")
+fisher = sfb.FisherConfig(mc_samples=100_000)
+tail = sfb.TailConfig(use_tail=True, cov_trace_est_samples=50_000)
 
 # Run the pipeline
 frontend = Front().to(device)
-out = estimate_mi_forward(
+out = sfb.estimate_mi_forward(
     sampler_x=sampler_x,
     frontend=frontend,
     t_grid=t_grid,
