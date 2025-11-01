@@ -12,7 +12,8 @@
 #  main.pdf  →  fileciteturn0file0
 #  info_grad.pdf → fileciteturn0file1
 #
-# Copyright (c) 2025. Research use permitted.
+# MIT License - Copyright (c) 2025 Tadashi Wadayama
+# See LICENSE file for full license text.
 
 from __future__ import annotations
 
