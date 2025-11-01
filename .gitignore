@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Experiment outputs
+results/
+checkpoints/
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# uv lock file is tracked
+# uv.lock should be committed to git
+
+# Internal documentation (not for public release)
+doc/

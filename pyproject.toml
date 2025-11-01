@@ -1,0 +1,14 @@
+[project]
+name = "sfblib"
+version = "0.2.0"
+description = "Score-to-Fisher Bridge (SFB) library for mutual information estimation and information gradient computation in nonlinear Gaussian channels"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "torch>=2.9.0",
+]
+readme = "README.md"
+authors = [
+    { name = "Tadashi Wadayama", email = "wadayama@nitech.ac.jp" }
+]
