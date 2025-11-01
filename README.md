@@ -69,7 +69,7 @@ uv add --dev pytest
 ```python
 import sys
 sys.path.insert(0, 'src')
-import sfblib
+import sfblib as sfb
 import torch
 import numpy as np
 
@@ -77,7 +77,7 @@ import numpy as np
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Fix random seed for reproducibility
-sfblib.set_seed(42)
+sfb.set_seed(42)
 ```
 
 ### Mutual Information Estimation
@@ -96,25 +96,25 @@ def sampler_x(batch_size, device):
 frontend = torch.nn.Identity()
 
 # Configuration objects
-grid_config = sfblib.LogGridConfig(
+grid_config = sfb.LogGridConfig(
     t_min=P/200,
     t_max=200*P,
     m_points=10,
     T_lower=P/200
 )
 
-dsm_config = sfblib.DSMConfig(
+dsm_config = sfb.DSMConfig(
     lr=1e-3,
     steps=300,
     batch_size=4096,
     scheme="per_t"  # or "noise_cond"
 )
 
-fisher_config = sfblib.FisherConfig(mc_samples=100000)
-tail_config = sfblib.TailConfig(use_tail=True)
+fisher_config = sfb.FisherConfig(mc_samples=100000)
+tail_config = sfb.TailConfig(use_tail=True)
 
 # Run MI estimation
-result = sfblib.estimate_mi_forward(
+result = sfb.estimate_mi_forward(
     sampler_x=sampler_x,
     frontend=frontend,
     t_grid=grid_config,
@@ -133,7 +133,7 @@ For Gaussian input with identity channel, theoretical values are available:
 
 ```python
 # Analytical solution (for validation)
-closed_form = sfblib.gaussian_awgn_closed_forms(P=P, n=n, t=t)
+closed_form = sfb.gaussian_awgn_closed_forms(P=P, n=n, t=t)
 print(f"Theoretical MI: {closed_form['I']:.4f} nats")
 print(f"Fisher information: {closed_form['J']:.4f}")
 print(f"MMSE: {closed_form['mmse']:.4f}")
@@ -201,10 +201,10 @@ uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 ```python
 # Reduce batch size
-dsm_config = sfblib.DSMConfig(batch_size=1024)
+dsm_config = sfb.DSMConfig(batch_size=1024)
 
 # Reduce Monte Carlo samples
-fisher_config = sfblib.FisherConfig(mc_samples=50000)
+fisher_config = sfb.FisherConfig(mc_samples=50000)
 ```
 
 ### Force CPU Usage
