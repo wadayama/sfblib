@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-import sfblib
+import sfblib as sfb
 
 # -------------------------
 # User settings (kept short)
@@ -21,11 +21,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 n, P = 4, 1.0                                  # dim and input power
 T_lower = P / 200.0                            # lower limit of the Fisher integral
-grid = sfblib.LogGridConfig(t_min=T_lower, t_max=50.0 * P, m_points=12, T_lower=T_lower)
+grid = sfb.LogGridConfig(t_min=T_lower, t_max=50.0 * P, m_points=12, T_lower=T_lower)
 
-dsm = sfblib.DSMConfig(steps=300, batch_size=8192, lr=1e-3, grad_clip=1.0, activation="silu")
-fisher = sfblib.FisherConfig(mc_samples=100_000)
-tail = sfblib.TailConfig(use_tail=True, cov_trace_est_samples=50_000)
+dsm = sfb.DSMConfig(steps=300, batch_size=8192, lr=1e-3, grad_clip=1.0, activation="silu")
+fisher = sfb.FisherConfig(mc_samples=100_000)
+tail = sfb.TailConfig(use_tail=True, cov_trace_est_samples=50_000)
 
 # X ~ N(0, P I_n)
 def sampler_x(batch, dev):
@@ -54,20 +54,20 @@ def cumulative_mi_log_trapz(t_vals: np.ndarray, J_vals: np.ndarray, n_dim: int, 
     return I
 
 def main():
-    sfblib.set_seed(seed, deterministic=True)
+    sfb.set_seed(seed, deterministic=True)
     frontend = Front().to(device)
 
     # (1) t-grid
-    t_vals = sfblib.make_log_grid(grid)                      # numpy array, geometric spacing
+    t_vals = sfb.make_log_grid(grid)                      # numpy array, geometric spacing
 
     # (2) per-t DSM -> Fisher
     J_list = []
     for t in t_vals:
-        score = sfblib.train_dsm_uncond(
+        score = sfb.train_dsm_uncond(
             sampler_x=sampler_x, frontend=frontend, t=float(t),
             dsm=dsm, device=device, y_dim=n
         )
-        Jt = sfblib.estimate_fisher_from_score(
+        Jt = sfb.estimate_fisher_from_score(
             score=score, sampler_x=sampler_x, frontend=frontend,
             t=float(t), fisher=fisher, device=device
         )
@@ -75,7 +75,7 @@ def main():
     J_hat = np.asarray(J_list, dtype=np.float64)
 
     # (3) tail and cumulative MI
-    tr_cov_x = sfblib.estimate_trace_cov_x(sampler_x, device, samples=tail.cov_trace_est_samples)
+    tr_cov_x = sfb.estimate_trace_cov_x(sampler_x, device, samples=tail.cov_trace_est_samples)
     tail_val = 0.5 * (tr_cov_x / float(t_vals[-1]))   # Eq. (45)
     I_hat = cumulative_mi_log_trapz(t_vals, J_hat, n, tail_val)
 
