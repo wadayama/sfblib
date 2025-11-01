@@ -32,11 +32,14 @@ uv sync
 ### Running Example Scripts
 
 ```bash
-# Identity channel validation (0.24% error vs theory)
+# Identity channel validation (< 0.5% error vs theory)
 uv run python src/comp_MI_identity.py
 
-# Generate MI curve visualization
+# Generate MI curve visualization (identity channel)
 uv run python src/MI_sfblib.py
+
+# Nonlinear tanh channel: DSM vs KDE-LOO comparison
+uv run python src/MI_tanh.py
 ```
 
 ### Adding New Packages
@@ -209,11 +212,12 @@ device = torch.device("cpu")
 ## Project Structure
 
 ```
-2025-sfblib_new/
+sfblib/
 ├── src/
-│   ├── sfblib.py              # Core library (1033 lines)
+│   ├── sfblib.py              # Core library (1135 lines)
 │   ├── comp_MI_identity.py    # Identity channel validation
-│   └── MI_sfblib.py           # MI curve visualization
+│   ├── MI_sfblib.py           # MI curve visualization (identity)
+│   └── MI_tanh.py             # Tanh channel: DSM vs KDE-LOO
 ├── README.md                  # This file
 ├── pyproject.toml             # uv project configuration
 ├── uv.lock                    # Dependency lock file
@@ -224,29 +228,15 @@ device = torch.device("cpu")
 
 Please cite the project papers when using this library (see internal documentation).
 
+
+## Acknowledgement
+
+This work was supported by JST, CRONOS, Japan Grant Number JPMJCS25N5.
+
 ## License
 
-MIT License
-
+This software is released under the [MIT License](https://opensource.org/licenses/MIT).
 Copyright (c) 2025 Tadashi Wadayama
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 
 ## Author
 
