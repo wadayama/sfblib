@@ -213,12 +213,6 @@ fisher_config = sfb.FisherConfig(mc_samples=50000)
 device = torch.device("cpu")
 ```
 
-## Validation Results
-
-- **Identity channel**: 0.24% relative error vs theoretical MI
-- **Gaussian input**: Excellent agreement across 4 orders of magnitude in noise variance
-- **Log-domain integration**: >10× improvement in accuracy over standard trapezoid
-
 ## Project Structure
 
 ```
@@ -233,11 +227,6 @@ sfblib/
 ├── uv.lock                    # Dependency lock file
 └── .gitignore                 # Git exclusions
 ```
-
-## Citation
-
-Please cite the project papers when using this library (see internal documentation).
-
 
 ## Acknowledgement
 
