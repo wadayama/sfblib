@@ -759,25 +759,59 @@ def ib_gradient(
 # Path-integral (eta-direction) - optional advanced utility
 # -----------------------------------------------------------------------------
 
-def integrate_mi_along_eta(
-    grad_fn: Callable[[nn.Module], float],
-    params_seq: Iterable[Tuple[nn.Module, float]]
-) -> float:
+def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = True):
     """
-    Estimate I(eta1) - I(eta0) ~ sum (I'(eta_k) * Deltaeta_k) via trapezoid over a piecewise-linear path in eta.
-    (info_grad Eq.(28)-(32), path-integral route).  
-    `params_seq` is an iterable of (frontend_clone, scalar_position) with monotonically increasing positions.
+    Numerically integrate a scalar (or dict of scalars) gradient along a 1D path {theta_k}.
+
+    Parameters
+    ----------
+    grad_fn : Callable
+        Function grad_fn(theta) -> float | torch.Tensor(0d/1d of size 1) | dict[str, float-like]
+        Returns dI/dtheta evaluated at 'theta'.
+    thetas : list
+        Sequence of theta values in the desired order (e.g., np.linspace(...).tolist()).
+    cumulative : bool, optional
+        If True, return a list (or dict[str, list]) of cumulative integrals from the first theta.
+        The first value is 0.0 (anchor at the first theta). Default: True.
+
+    Returns
+    -------
+    list | float | dict
+        If cumulative=True: list of cumulative integrals (or dict[str, list]).
+        If cumulative=False: final integral value (or dict[str, float]).
+
+    Notes
+    -----
+    Uses trapezoidal rule on a potentially non-uniform grid.
     """
-    vals = [(pos, grad_fn(model)) for (model, pos) in params_seq]
-    vals = sorted(vals, key=lambda t: t[0])
-    if len(vals) < 2:
-        return 0.0
-    acc = 0.0
-    for (p0, g0), (p1, g1) in zip(vals[:-1], vals[1:]):
-        acc += 0.5 * (g0 + g1) * (p1 - p0)
-    return float(acc)
+    def _to_float(x):
+        if isinstance(x, (float, int)):
+            return float(x)
+        if isinstance(x, torch.Tensor):
+            return float(x.detach().mean().item())
+        return float(x)
 
+    # Evaluate gradients on the grid
+    gvals = [grad_fn(th) for th in thetas]
+    # Scalar or dict?
+    is_dict = isinstance(gvals[0], dict)
 
+    def _trapz_scalar(gs, xs):
+        acc = [0.0]
+        for i in range(1, len(xs)):
+            h = float(xs[i] - xs[i-1])
+            acc.append(acc[-1] + 0.5 * (_to_float(gs[i-1]) + _to_float(gs[i])) * h)
+        return acc
+
+    if not is_dict:
+        return _trapz_scalar(gvals, thetas) if cumulative else _trapz_scalar(gvals, thetas)[-1]
+
+    # dict[str, scalar] case
+    keys = list(gvals[0].keys())
+    series = {k: [] for k in keys}
+    for k in keys:
+        series[k] = _trapz_scalar([gv[k] for gv in gvals], thetas)
+    return series if cumulative else {k: v[-1] for k, v in series.items()}
 
 
 # -----------------------------------------------------------------------------
@@ -1145,7 +1179,7 @@ __all__ = [
     # Stein & VJP & gradients
     "stein_calibrate_scalar", "vjp_loss", "info_gradient", "task_info_gradient", "ib_gradient",
     # advanced
-    "integrate_mi_along_eta",
+    "integrate_along_path",
     # closed-form
     "gaussian_awgn_closed_forms", "linear_gaussian_closed_forms",
     # utilities
