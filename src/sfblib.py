@@ -245,16 +245,6 @@ class TailConfig:
     use_tail: bool = True
     cov_trace_est_samples: int = 50_000
 
-@dataclass
-class AlternatingOptConfig:
-    outer_iters: int = 20
-    score_steps: int = 200
-    eta_lr: float = 5e-2
-    batch_size: int = 8192
-    weight_decay: float = 0.0
-    beta: float = 1.0           # used in IB mode
-    mode: str = "mi"            # "mi" | "task" | "ib"
-
 
 # -----------------------------------------------------------------------------
 # DSM losses (core)
@@ -765,105 +755,6 @@ def ib_gradient(
     return float(loss.item()), grads
 
 
-def alternating_optimize(
-    mode: str,
-    sampler_x: Callable[[int, torch.device], torch.Tensor],
-    frontend: nn.Module,
-    device: torch.device,
-    t: float,
-    dsm: DSMConfig,
-    alt: AlternatingOptConfig,
-    task_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
-) -> Iterable[Dict[str, Any]]:
-    """
-    Alternating optimization (info_grad Algorithm structure).  Phase-1: DSM; Phase-2: eta-update via VJP loss.  
-
-    Yields dicts: {"iter": k, "Lvjp": float, "loss": float}
-    """
-    channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
-    opt = torch.optim.AdamW(frontend.parameters(), lr=alt.eta_lr, weight_decay=alt.weight_decay)
-
-    # score learners
-    if mode == "mi":
-        score = ScoreNetMLP(dim=channel.y_dim or sampler_x(1, device).shape[1],
-                            hidden=dsm.hidden, layers=dsm.layers, activation=dsm.activation).to(device)
-    elif mode in ("task", "ib"):
-        score_un = ScoreNetMLP(dim=channel.y_dim or sampler_x(1, device).shape[1],
-                               hidden=dsm.hidden, layers=dsm.layers, activation=dsm.activation).to(device)
-        # infer tau_dim at runtime
-        with torch.no_grad():
-            x0 = sampler_x(1, device)
-            tau_dim = int(task_fn(x0).shape[1])
-        score_ct = CondTaskScoreNet(y_dim=channel.y_dim or sampler_x(1, device).shape[1],
-                                    tau_dim=tau_dim, hidden=dsm.hidden, layers=dsm.layers,
-                                    activation=dsm.activation).to(device)
-    else:
-        raise ValueError("mode must be 'mi'|'task'|'ib'.")
-
-    for k in range(alt.outer_iters):
-        # Phase 1: fit score(s) with DSM at fixed t
-        if mode == "mi":
-            score = train_score_generic(
-                make_model=lambda: score,
-                loss_fn=lambda mdl, w, tt: dsm_loss_uncond(mdl, w, float(tt)),
-                channel=channel, device=device, t=float(t), steps=alt.score_steps, batch_size=alt.batch_size,
-                lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
-            )
-        else:
-            score_un = train_score_generic(
-                make_model=lambda: score_un,
-                loss_fn=lambda mdl, w, tt: dsm_loss_uncond(mdl, w, float(tt)),
-                channel=channel, device=device, t=float(t), steps=alt.score_steps, batch_size=alt.batch_size,
-                lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
-            )
-            # conditional DSM for s(y, tau)
-            def _sampler_cond(xx: torch.Tensor) -> torch.Tensor:
-                return task_fn(xx)
-            score_ct = train_score_generic(
-                make_model=lambda: score_ct,
-                loss_fn=lambda mdl, w, tt: dsm_loss_conditional(mdl, w, _sampler_cond(channel.sampler_x(w.shape[0], device)), float(t)),
-                channel=channel, device=device, t=float(t), steps=alt.score_steps, batch_size=alt.batch_size,
-                lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
-            )
-
-        # Phase 2: VJP loss and eta update
-        if mode == "mi":
-            Lvjp, _ = info_gradient(frontend, score, sampler_x, t, alt.batch_size, device, noise_conditional=False,
-                                    stein_calibrate=dsm.stein_calibrate)
-            # ascent on -Lvjp
-            opt.zero_grad(set_to_none=True)
-            # recompute for graph
-            x, w, y = simulate_y(channel, t, alt.batch_size, device)
-            s_y = (score(y)).detach()
-            loss = - (frontend(x) * s_y).sum(dim=-1).mean()
-            loss.backward()
-            opt.step()
-        elif mode == "task":
-            assert task_fn is not None, "task_fn required for mode='task'"
-            Lvjp, _ = task_info_gradient(frontend, score_un, score_ct, sampler_x, task_fn, t, alt.batch_size, device,
-                                         noise_conditional=False, stein_calibrate=dsm.stein_calibrate)
-            opt.zero_grad(set_to_none=True)
-            x, w, y = simulate_y(channel, t, alt.batch_size, device)
-            tau = task_fn(x)
-            vec = (score_ct(y, tau) - score_un(y)).detach()
-            loss = - (frontend(x) * vec).sum(dim=-1).mean()
-            loss.backward()
-            opt.step()
-        else:
-            assert task_fn is not None, "task_fn required for mode='ib'"
-            Lvjp, _ = ib_gradient(frontend, score_un, score_ct, sampler_x, task_fn, t, alt.beta, alt.batch_size, device,
-                                  noise_conditional=False, stein_calibrate=dsm.stein_calibrate)
-            opt.zero_grad(set_to_none=True)
-            x, w, y = simulate_y(channel, t, alt.batch_size, device)
-            tau = task_fn(x)
-            vec = (score_ct(y, tau) + (alt.beta - 1.0) * score_un(y)).detach()
-            loss = - (frontend(x) * vec).sum(dim=-1).mean()
-            loss.backward()
-            opt.step()
-
-        yield {"iter": k, "Lvjp": float(Lvjp), "loss": float(loss.item())}
-
-
 # -----------------------------------------------------------------------------
 # Path-integral (eta-direction) - optional advanced utility
 # -----------------------------------------------------------------------------
@@ -885,6 +776,8 @@ def integrate_mi_along_eta(
     for (p0, g0), (p1, g1) in zip(vals[:-1], vals[1:]):
         acc += 0.5 * (g0 + g1) * (p1 - p0)
     return float(acc)
+
+
 
 
 # -----------------------------------------------------------------------------
@@ -1239,7 +1132,7 @@ __all__ = [
     # models
     "ScoreNetMLP", "NoiseCondScoreNet", "CondTaskScoreNet",
     # configs
-    "DSMConfig", "LogGridConfig", "FisherConfig", "TailConfig", "AlternatingOptConfig",
+    "DSMConfig", "LogGridConfig", "FisherConfig", "TailConfig",
     # DSM core & train
     "dsm_loss_uncond", "dsm_loss_noise_cond", "dsm_loss_conditional", "train_score_generic",
     "train_dsm_uncond", "train_dsm_noise_cond", "train_dsm_conditional_task",
@@ -1251,7 +1144,6 @@ __all__ = [
     "estimate_trace_cov_x", "estimate_fisher_from_score", "estimate_mi_forward",
     # Stein & VJP & gradients
     "stein_calibrate_scalar", "vjp_loss", "info_gradient", "task_info_gradient", "ib_gradient",
-    "alternating_optimize",
     # advanced
     "integrate_mi_along_eta",
     # closed-form
