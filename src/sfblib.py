@@ -904,7 +904,7 @@ def gaussian_awgn_closed_forms(P: float, n: int, t: float) -> Dict[str, float]:
 
 def linear_gaussian_closed_forms(A: torch.Tensor, P: float, t: float) -> Dict[str, float]:
     """
-    Closed forms for Y = A X + Z_t, X~N(0,P I) (main Eq.(35)-(37)).  
+    Closed forms for Y = A X + Z_t, X~N(0,P I) (main Eq.(35)-(37)).
     Returns dict with keys: I, J (nats).
     """
     A = A.detach().cpu().double()
@@ -914,6 +914,63 @@ def linear_gaussian_closed_forms(A: torch.Tensor, P: float, t: float) -> Dict[st
     I = 0.5 * float(logdet)  # log det(I + (P/t) A A^T)
     J = float(torch.trace(torch.inverse(Sigma)))
     return {"I": I, "J": J}
+
+
+def project_to_frobenius_ball(A: torch.Tensor, radius: float) -> torch.Tensor:
+    """
+    Project a matrix to Frobenius ball of given radius.
+    If ||A||_F > radius, scale A to ||A||_F = radius.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        Matrix to project (modified in-place if needed).
+    radius : float
+        Frobenius norm constraint.
+
+    Returns
+    -------
+    torch.Tensor
+        Projected matrix (same object as input, modified in-place).
+    """
+    with torch.no_grad():
+        fro = torch.linalg.norm(A, ord='fro')
+        if fro > radius:
+            A = A * (radius / fro)
+    return A
+
+
+def mi_linear_gaussian(A: torch.Tensor, sigma_x2: float, t: float) -> float:
+    """
+    Mutual information for linear vector Gaussian channel via log-det formula.
+
+    Channel: Y = A X + Z_t,  X ~ N(0, sigma_x2 I),  Z_t ~ N(0, t I)
+
+    Formula: I(A) = 0.5 * log det(I + (sigma_x2/t) A A^T)  [nats]
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        Channel matrix (m x n).
+    sigma_x2 : float
+        Input variance.
+    t : float
+        Noise variance.
+
+    Returns
+    -------
+    float
+        Mutual information [nats].
+    """
+    with torch.no_grad():
+        m = A.shape[0]
+        AA = (sigma_x2 / t) * (A @ A.T)
+        I = torch.eye(m, device=A.device, dtype=A.dtype)
+        M = I + AA
+        # Use Cholesky for numerical stability: logdet(M) = 2 sum log diag(L)
+        L = torch.linalg.cholesky(M)
+        logdet = 2.0 * torch.log(torch.diag(L)).sum()
+        return float(0.5 * logdet.item())
 
 
 # -----------------------------------------------------------------------------
@@ -1199,6 +1256,8 @@ __all__ = [
     "integrate_mi_along_eta",
     # closed-form
     "gaussian_awgn_closed_forms", "linear_gaussian_closed_forms",
+    # utilities
+    "project_to_frobenius_ball", "mi_linear_gaussian",
     # KDE-LOO
     "mi_kde_loo_gaussian_pairs", "estimate_mi_kde_loo",
     # VJP & Stein calibration

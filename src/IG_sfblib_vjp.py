@@ -1,10 +1,10 @@
-# IG_fig3_sfblib_vjp.py
+# IG_sfblib_vjp.py
 # Fig.3-style comparison of dI/dalpha using sfblib v0.2.x with VJP helpers:
 #   (1) Analytic gradient (closed-form)
 #   (2) VJP with TRUE score
 #   (3) VJP with DSM score (per-alpha training) + Stein scalar calibration
 #
-# Only one figure is saved: "IG_fig3_dIdalpha.pdf".
+# Only one figure is saved: "IG_dIdalpha.pdf".
 #
 # Theory references:
 # - Information-gradient & VJP identity: Eq.(10),(23),(25) in the info_grad paper.
@@ -159,7 +159,7 @@ def main():
     plt.ylabel(r"$\partial I / \partial \alpha$ [nats per unit]")
     plt.grid(True, which="both", ls="-", alpha=0.3)
     plt.legend()
-    out = "IG_fig3_dIdalpha_sfblib.pdf"
+    out = "IG_dIdalpha_sfblib.pdf"
     plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out}")

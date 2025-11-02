@@ -29,7 +29,7 @@ This is a PyTorch library for mutual information estimation and information grad
   - `src/MI_sfblib.py` - MI curve visualization
   - `src/MI_tanh.py` - Tanh channel DSM vs KDE-LOO comparison
   - `src/IG_fig3.py` - Information gradient Figure 3 reproduction
-  - `src/IG_fig3_sfblib_vjp.py` - Information gradient with VJP helpers
+  - `src/IG_sfblib_vjp.py` - Information gradient with VJP helpers
 
 ### Import Style
 
@@ -53,7 +53,7 @@ uv run python src/MI_tanh.py
 
 # Information gradient experiments
 uv run python src/IG_fig3.py
-uv run python src/IG_fig3_sfblib_vjp.py
+uv run python src/IG_sfblib_vjp.py
 ```
 
 ### Adding Dependencies
