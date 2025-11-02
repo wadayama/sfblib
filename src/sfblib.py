@@ -815,33 +815,8 @@ def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = 
 
 
 # -----------------------------------------------------------------------------
-# Closed-form helpers for validation
+# Utility functions
 # -----------------------------------------------------------------------------
-
-def gaussian_awgn_closed_forms(P: float, n: int, t: float) -> Dict[str, float]:
-    """
-    Closed forms for X~N(0,P I), Y=X+Z_t (main Eq.(30)-(32)).  
-    Returns dict with keys: I, J, mmse (nats).
-    """
-    I = 0.5 * n * math.log1p(P / t)
-    J = n / (P + t)
-    mmse = n * P * t / (P + t)
-    return {"I": I, "J": J, "mmse": mmse}
-
-
-def linear_gaussian_closed_forms(A: torch.Tensor, P: float, t: float) -> Dict[str, float]:
-    """
-    Closed forms for Y = A X + Z_t, X~N(0,P I) (main Eq.(35)-(37)).
-    Returns dict with keys: I, J (nats).
-    """
-    A = A.detach().cpu().double()
-    n = A.shape[0]
-    Sigma = (P * (A @ A.T) + t * torch.eye(n, dtype=torch.double))
-    sign, logdet = torch.slogdet(Sigma / (t * torch.eye(n, dtype=torch.double)))
-    I = 0.5 * float(logdet)  # log det(I + (P/t) A A^T)
-    J = float(torch.trace(torch.inverse(Sigma)))
-    return {"I": I, "J": J}
-
 
 def project_to_frobenius_ball(A: torch.Tensor, radius: float) -> torch.Tensor:
     """
@@ -1180,8 +1155,6 @@ __all__ = [
     "stein_calibrate_scalar", "vjp_loss", "info_gradient", "task_info_gradient", "ib_gradient",
     # advanced
     "integrate_along_path",
-    # closed-form
-    "gaussian_awgn_closed_forms", "linear_gaussian_closed_forms",
     # utilities
     "project_to_frobenius_ball", "mi_linear_gaussian",
     # KDE-LOO
