@@ -723,7 +723,7 @@ def ib_gradient(
 # Path-integral (eta-direction) - optional advanced utility
 # -----------------------------------------------------------------------------
 
-def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = True):
+def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = True, offset: float = 0.0):
     """
     Numerically integrate a scalar (or dict of scalars) gradient along a 1D path {theta_k}.
 
@@ -736,7 +736,9 @@ def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = 
         Sequence of theta values in the desired order (e.g., np.linspace(...).tolist()).
     cumulative : bool, optional
         If True, return a list (or dict[str, list]) of cumulative integrals from the first theta.
-        The first value is 0.0 (anchor at the first theta). Default: True.
+        The first value equals 'offset'. Default: True.
+    offset : float, optional
+        Baseline value for the integral at the first theta. Default: 0.0.
 
     Returns
     -------
@@ -747,6 +749,7 @@ def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = 
     Notes
     -----
     Uses trapezoidal rule on a potentially non-uniform grid.
+    The first element of the cumulative output equals 'offset'.
     """
     def _to_float(x):
         if isinstance(x, (float, int)):
@@ -761,7 +764,7 @@ def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = 
     is_dict = isinstance(gvals[0], dict)
 
     def _trapz_scalar(gs, xs):
-        acc = [0.0]
+        acc = [float(offset)]
         for i in range(1, len(xs)):
             h = float(xs[i] - xs[i-1])
             acc.append(acc[-1] + 0.5 * (_to_float(gs[i-1]) + _to_float(gs[i])) * h)
@@ -772,10 +775,8 @@ def integrate_along_path(grad_fn: Callable, thetas: list, *, cumulative: bool = 
 
     # dict[str, scalar] case
     keys = list(gvals[0].keys())
-    series = {k: [] for k in keys}
-    for k in keys:
-        series[k] = _trapz_scalar([gv[k] for gv in gvals], thetas)
-    return series if cumulative else {k: v[-1] for k, v in series.items()}
+    out = {k: _trapz_scalar([gv[k] for gv in gvals], thetas) for k in keys}
+    return out if cumulative else {k: v[-1] for k, v in out.items()}
 
 
 # -----------------------------------------------------------------------------
