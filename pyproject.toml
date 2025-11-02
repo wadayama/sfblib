@@ -12,3 +12,8 @@ readme = "README.md"
 authors = [
     { name = "Tadashi Wadayama", email = "wadayama@nitech.ac.jp" }
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]

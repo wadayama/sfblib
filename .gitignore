@@ -5,6 +5,11 @@ __pycache__/
 *.so
 .Python
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Virtual environments
 .venv/
 venv/
