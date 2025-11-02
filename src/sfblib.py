@@ -1123,13 +1123,12 @@ __all__ = [
     # high-level
     "estimate_trace_cov_x", "estimate_fisher_from_score", "estimate_mi_forward",
     # Stein & VJP & gradients
-    "stein_calibrate_scalar", "vjp_loss", "info_gradient", "task_info_gradient", "ib_gradient",
+    "stein_calibrate_scalar", "vjp_loss", "estimate_info_grad",
+    "info_gradient", "task_info_gradient", "ib_gradient",
     # advanced
     "integrate_along_path",
     # utilities
     "project_to_frobenius_ball", "mi_linear_gaussian",
     # KDE-LOO
     "mi_kde_loo_gaussian_pairs", "estimate_mi_kde_loo",
-    # VJP & Stein calibration
-    "vjp_loss", "stein_calibrate_scalar", "estimate_info_grad",
 ]
