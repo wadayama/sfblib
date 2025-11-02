@@ -228,8 +228,8 @@ print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 
 ### Linear Gaussian baselines (closed-form)
 
-- `mi_linear_gaussian(A, sigma_x2, t, alpha=1.0) -> float`
-  I = (1/2) log det(I + (α²σ_x²/t) A A^T) via Cholesky.
+- `mi_linear_gaussian(A, sigma_x2, t) -> float`
+  I = (1/2) log det(I + (σ_x²/t) A A^T) via Cholesky.
 
 ### Utilities
 
