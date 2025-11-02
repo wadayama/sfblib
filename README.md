@@ -50,6 +50,9 @@ uv run python src/MI_sfblib.py
 
 # Nonlinear tanh channel: DSM vs KDE-LOO comparison
 uv run python src/MI_tanh.py
+
+# Information gradient: reproduce paper Fig.3
+uv run python src/IG_fig3_sfblib_vjp.py
 ```
 
 ### Adding New Packages
@@ -139,6 +142,41 @@ print(f"Fisher information: {closed_form['J']:.4f}")
 print(f"MMSE: {closed_form['mmse']:.4f}")
 ```
 
+### Information Gradient Computation
+
+Compute gradients of mutual information with respect to channel parameters:
+
+```python
+# Define a parameterized frontend
+class LinearFrontend(torch.nn.Module):
+    def __init__(self, A, alpha):
+        super().__init__()
+        self.register_buffer("A", A)
+        self.alpha = torch.nn.Parameter(torch.tensor(alpha))
+
+    def forward(self, x):
+        return self.alpha * (x @ self.A.T)
+
+# Create frontend and score function
+frontend = LinearFrontend(A, alpha_init=1.0)
+score_fn = ...  # From DSM training or analytical
+
+# Compute information gradient using VJP
+grad_dict = sfb.estimate_info_grad(
+    frontend=frontend,
+    score_eval=score_fn,
+    sampler_x=sampler_x,
+    t=0.5,
+    N=100_000,
+    batch_size=8192,
+    device=device,
+    params=(frontend.alpha,),
+    stop_grad_score=True
+)
+
+print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
+```
+
 ## Theory
 
 This implementation is based on two research papers:
@@ -218,14 +256,16 @@ device = torch.device("cpu")
 ```
 sfblib/
 ├── src/
-│   ├── sfblib.py              # Core library (1135 lines)
-│   ├── comp_MI_identity.py    # Identity channel validation
-│   ├── MI_sfblib.py           # MI curve visualization (identity)
-│   └── MI_tanh.py             # Tanh channel: DSM vs KDE-LOO
-├── README.md                  # This file
-├── pyproject.toml             # uv project configuration
-├── uv.lock                    # Dependency lock file
-└── .gitignore                 # Git exclusions
+│   ├── sfblib.py                 # Core library with VJP helpers
+│   ├── comp_MI_identity.py       # Identity channel validation
+│   ├── MI_sfblib.py              # MI curve visualization (identity)
+│   ├── MI_tanh.py                # Tanh channel: DSM vs KDE-LOO
+│   └── IG_fig3_sfblib_vjp.py     # Information gradient (reproduces paper Fig.3)
+├── README.md                     # This file
+├── claude.md                     # Instructions for Claude Code
+├── pyproject.toml                # uv project configuration
+├── uv.lock                       # Dependency lock file
+└── .gitignore                    # Git exclusions
 ```
 
 ## Acknowledgement
