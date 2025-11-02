@@ -56,6 +56,9 @@ uv run python src/IG_sfblib_vjp.py
 
 # Projected gradient ascent: optimize channel matrix A
 uv run python src/A_optim_sfblib.py
+
+# Path integral MI reconstruction (parameter integration)
+uv run python src/path_integral.py
 ```
 
 ### Adding New Packages
@@ -131,18 +134,6 @@ result = sfb.estimate_mi_forward(
 )
 
 print(f"Estimated MI: {result['I_hat']:.4f} nats")
-```
-
-### Comparison with Closed-Form Solution
-
-For Gaussian input with identity channel, theoretical values are available:
-
-```python
-# Analytical solution (for validation)
-closed_form = sfb.gaussian_awgn_closed_forms(P=P, n=n, t=t)
-print(f"Theoretical MI: {closed_form['I']:.4f} nats")
-print(f"Fisher information: {closed_form['J']:.4f}")
-print(f"MMSE: {closed_form['mmse']:.4f}")
 ```
 
 ### Information Gradient Computation
@@ -264,7 +255,8 @@ sfblib/
 │   ├── MI_sfblib.py              # MI curve visualization (identity)
 │   ├── MI_tanh.py                # Tanh channel: DSM vs KDE-LOO
 │   ├── IG_sfblib_vjp.py          # Information gradient (reproduces paper Fig.3)
-│   └── A_optim_sfblib.py         # Projected gradient ascent for channel matrix A
+│   ├── A_optim_sfblib.py         # Projected gradient ascent for channel matrix A
+│   └── path_integral.py          # Path integral MI reconstruction
 ├── README.md                     # This file
 ├── claude.md                     # Instructions for Claude Code
 ├── pyproject.toml                # uv project configuration
