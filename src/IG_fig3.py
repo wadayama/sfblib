@@ -1,15 +1,15 @@
 
 # IG_fig3_v020.py
 # Information-gradient sample for Fig.3 in the info_grad paper:
-# Compare dI/dα for a linear vector Gaussian channel using three methods:
+# Compare dI/dalpha for a linear vector Gaussian channel using three methods:
 #   (1) Analytic gradient (closed-form)
-#   (2) VJP with TRUE score  s_Y(y) = -Σ_Y^{-1} y     (Monte Carlo)
-#   (3) VJP with learned score via DSM (per-α training, unconditional)
+#   (2) VJP with TRUE score  s_Y(y) = -Sigma_Y^{-1} y     (Monte Carlo)
+#   (3) VJP with learned score via DSM (per-alpha training, unconditional)
 #
 # References:
 # - Information-gradient formula & VJP identity: Eq.(10),(23),(25).  fileciteturn0file1
 # - DSM loss (fixed t): Eq.(27) in MI paper (equiv. Eq.(61) style here).      fileciteturn0file0
-# - Linear vector channel analytic gradient: Eq.(83)–(84).                    fileciteturn0file1
+# - Linear vector channel analytic gradient: Eq.(83)-(84).                    fileciteturn0file1
 #
 # Output: A single PDF figure "IG_fig3_dIdalpha.pdf".
 #
@@ -33,9 +33,9 @@ sfb.set_seed(seed, deterministic=True)
 n = m = 8            # dims
 sigma_x2 = 1.0       # Var(X) = sigma_x2 * I
 t = 0.5              # noise variance
-alphas = np.linspace(0.0, 3.0, 31)  # α grid (0..3)
+alphas = np.linspace(0.0, 3.0, 31)  # alpha grid (0..3)
 
-# mild ill-conditioning for A (largest/smallest ≈ 12)
+# mild ill-conditioning for A (largest/smallest ~= 12)
 def orthogonal_matrix(n, dev):
     with torch.no_grad():
         q, r = torch.linalg.qr(torch.randn(n, n, device=dev))
@@ -57,7 +57,7 @@ def sampler_x(batch, dev):
     return torch.randn(batch, n, device=dev) * math.sqrt(sigma_x2)
 
 class FrontAlphaConst(torch.nn.Module):
-    """f(x) = α A x (α is a Python float; no grad needed)."""
+    """f(x) = alpha A x (alpha is a Python float; no grad needed)."""
     def __init__(self, A: torch.Tensor, alpha: float):
         super().__init__()
         self.register_buffer("A", A)
@@ -66,7 +66,7 @@ class FrontAlphaConst(torch.nn.Module):
         return self.alpha * (x @ self.A.T)
 
 class FrontAlphaParam(torch.nn.Module):
-    """f(x) = α A x with α as nn.Parameter (to take ∂/∂α via autograd)."""
+    """f(x) = alpha A x with alpha as nn.Parameter (to take d/dalpha via autograd)."""
     def __init__(self, A: torch.Tensor, alpha_init: float):
         super().__init__()
         self.register_buffer("A", A)
@@ -77,7 +77,7 @@ class FrontAlphaParam(torch.nn.Module):
 # --------------------------------
 # (1) Analytic gradient (Eq.(84))
 # --------------------------------
-# ∂I/∂α = Σ_i α σ_x^2 s_i^2 / ( t + α^2 σ_x^2 s_i^2 )
+# dI/dalpha = Sigma_i alpha sigma_x^2 s_i^2 / ( t + alpha^2 sigma_x^2 s_i^2 )
 s2 = (s_vals**2).detach().cpu().numpy()
 def grad_analytic(alpha: float) -> float:
     num = alpha * sigma_x2 * s2
@@ -85,9 +85,9 @@ def grad_analytic(alpha: float) -> float:
     return float(np.sum(num / den))
 
 # ---------------------------------------------------
-# (2) VJP with TRUE score s_Y(y) = - Σ_Y^{-1} y (MC)
+# (2) VJP with TRUE score s_Y(y) = - Sigma_Y^{-1} y (MC)
 # ---------------------------------------------------
-# ∂I/∂α = - E[ < A X , s_Y(Y) > ],   Y = α A X + Z,  Σ_Y = α^2 σ_x^2 A A^T + t I
+# dI/dalpha = - E[ < A X , s_Y(Y) > ],   Y = alpha A X + Z,  Sigma_Y = alpha^2 sigma_x^2 A A^T + t I
 def grad_true_score(alpha: float, N: int = 100_000, chunk: int = 16_384) -> float:
     with torch.no_grad():
         AX = A @ A.T  # (m,m)
@@ -113,13 +113,13 @@ def grad_true_score(alpha: float, N: int = 100_000, chunk: int = 16_384) -> floa
         return -dot_mean
 
 # ---------------------------------------------------
-# (3) VJP with learned score via DSM (per-α training)
+# (3) VJP with learned score via DSM (per-alpha training)
 # ---------------------------------------------------
 # DSM config (close to the paper: 2 layers, width 256, steps ~1000)
 dsm = sfb.DSMConfig(steps=1000, batch_size=4096, lr=1e-3, hidden=256, layers=2, activation="silu", grad_clip=1.0)
 
 def stein_calibrate(score_model: torch.nn.Module, sampler_y, B: int = 8192) -> float:
-    """Scalar c so that E[Y^T (c s(Y))] ≈ -m (Gaussian Stein identity)."""
+    """Scalar c so that E[Y^T (c s(Y))] ~= -m (Gaussian Stein identity)."""
     with torch.no_grad():
         y = sampler_y(B)
         s = score_model(y)
@@ -127,11 +127,11 @@ def stein_calibrate(score_model: torch.nn.Module, sampler_y, B: int = 8192) -> f
         return float(-m / (den + 1e-12))
 
 def grad_dsm(alpha: float, N_eval: int = 100_000, chunk: int = 8192) -> float:
-    # Train sθ at this α (unconditional DSM at fixed t)
+    # Train sθ at this alpha (unconditional DSM at fixed t)
     frontend_train = FrontAlphaConst(A, alpha).to(device)
     score = sfb.train_dsm_uncond(sampler_x, frontend_train, t, dsm, device, y_dim=m)
 
-    # Prepare α as a differentiable parameter for the VJP step
+    # Prepare alpha as a differentiable parameter for the VJP step
     frontend_eval = FrontAlphaParam(A, alpha).to(device)
     alpha_param = frontend_eval.alpha
 
@@ -144,8 +144,8 @@ def grad_dsm(alpha: float, N_eval: int = 100_000, chunk: int = 8192) -> float:
 
     c = stein_calibrate(score, sample_y, B=8192)
 
-    # Accumulate the gradient of Lvjp = E < fα(x), stop(sθ(y)) >
-    # dI/dα ≈ - d/dα Lvjp
+    # Accumulate the gradient of Lvjp = E < falpha(x), stop(sθ(y)) >
+    # dI/dalpha ~= - d/dalpha Lvjp
     if alpha_param.grad is not None:
         alpha_param.grad.zero_()
 
@@ -154,12 +154,12 @@ def grad_dsm(alpha: float, N_eval: int = 100_000, chunk: int = 8192) -> float:
         B = min(chunk, N_eval - done)
         x = sampler_x(B, device)
         z = torch.randn(B, m, device=device)
-        f = frontend_eval(x)                    # α A x
+        f = frontend_eval(x)                    # alpha A x
         y = f + z * math.sqrt(t)
         s = (c * score(y)).detach()            # stop-gradient
         L = (f * s).sum(dim=1).mean()          # inner product average
         w = B / float(N_eval)
-        (w * L).backward()                     # accumulate into α.grad
+        (w * L).backward()                     # accumulate into alpha.grad
         done += B
 
     grad_est = - float(alpha_param.grad.item())
@@ -172,9 +172,9 @@ def grad_dsm(alpha: float, N_eval: int = 100_000, chunk: int = 8192) -> float:
 # ------------------------------
 def main():
     g1, g2, g3 = [], [], []
-    print("Computing dI/dα on", device, "for α in", alphas)
+    print("Computing dI/dalpha on", device, "for alpha in", alphas)
     for a in alphas:
-        print(f"[α={a:.2f}] analytic...", end="")
+        print(f"[alpha={a:.2f}] analytic...", end="")
         g1.append(grad_analytic(a))
         print(" true-score...", end="")
         g2.append(grad_true_score(a, N=100_000, chunk=16_384))
@@ -184,7 +184,7 @@ def main():
 
     # Plot
     plt.figure()
-    plt.plot(alphas, g1, label="Analytic ∂I/∂α")
+    plt.plot(alphas, g1, label="Analytic dI/dalpha")
     plt.plot(alphas, g2, linestyle="--", label="VJP (TRUE score)")
     plt.plot(alphas, g3, linestyle="-.", label="VJP (DSM, unconditional)")
     plt.xlabel(r"$\alpha$")
