@@ -598,37 +598,8 @@ def estimate_mi_forward(
 
 
 # -----------------------------------------------------------------------------
-# Stein calibration
-# -----------------------------------------------------------------------------
-
-@torch.no_grad()
-def stein_calibrate_scalar(score_eval: Callable[[torch.Tensor], torch.Tensor],
-                           y_sampler: Callable[[int], torch.Tensor],
-                           B: int = 8192) -> float:
-    """
-    Estimate a scalar c so that E[ Y^T (c s(Y)) ] ~ -m  (Gaussian Stein identity).
-    Applied as s~ = c s to reduce global scale bias. (Used in info_grad experiments Sec.VII)  
-    """
-    y = y_sampler(B)
-    s = score_eval(y)
-    m = y.shape[1]
-    num = -m
-    den = (y * s).sum(dim=1).mean().item() + 1e-12
-    c = num / den
-    return float(c)
-
-
-# -----------------------------------------------------------------------------
 # Information gradients via VJP (core) and alternation
 # -----------------------------------------------------------------------------
-
-def vjp_loss(frontend: nn.Module, vec_field: torch.Tensor, x: torch.Tensor, stop_grad: bool = True) -> torch.Tensor:
-    """
-    L_vjp = < f_eta(x), stop(v) >;  nabla__eta L_vjp = Df_eta(x)^T v  (VJP identity, info_grad Eq.(23)).  
-    """
-    v = vec_field.detach() if stop_grad else vec_field
-    return (frontend(x) * v).sum(dim=-1).mean()
-
 
 @torch.no_grad()
 def _draw_batch_y(channel: ChannelSpec, t: float, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
