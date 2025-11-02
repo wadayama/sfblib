@@ -601,13 +601,6 @@ def estimate_mi_forward(
 # Information gradients via VJP (core) and alternation
 # -----------------------------------------------------------------------------
 
-@torch.no_grad()
-def _draw_batch_y(channel: ChannelSpec, t: float, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    x = channel.sampler_x(batch_size, device)
-    y = channel.frontend(x) + math.sqrt(t) * torch.randn(batch_size, channel.y_dim or channel.frontend(x).shape[1], device=device)
-    return x, y, channel.frontend(x)
-
-
 def info_gradient(
     frontend: nn.Module,
     score_model: nn.Module,
