@@ -189,6 +189,68 @@ grad_dict = sfb.estimate_info_grad(
 print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 ```
 
+## API Quick Reference
+
+> Minimal cheatsheet. See function docstrings for details.
+
+### Core training / gradient
+
+- `set_seed(seed=0, deterministic=True) -> None`
+  Reproducibility flags (`cudnn.deterministic` etc).
+
+- `DSMConfig(steps=1000, batch_size=4096, lr=1e-3, hidden=256, layers=2, activation="silu", grad_clip=1.0)`
+  Config for DSM training.
+
+- `train_dsm_uncond(sampler_x, frontend, t, dsm: DSMConfig, device, y_dim=None) -> nn.Module`
+  Train **unconditional** score `s(y)` at fixed noise variance `t`. Returns `score(y)`.
+
+- `estimate_info_grad(frontend, score_eval, sampler_x, t, N, batch_size, device, params=None, stop_grad_score=True) -> dict[str, float|np.ndarray]`
+  VJP-based info gradient w.r.t. `params` (e.g. `(frontend.alpha,)` or `(frontend.A,)`).
+  **score_eval** is a callable `s(y)`. Set `stop_grad_score=True`.
+
+- `stein_calibrate_scalar(score: nn.Module, y_sampler: Callable[[int], Tensor], m: int, B=8192) -> float`
+  One-scalar Stein calibration: make `E[Y^T (c s(Y))] ≈ -m`.
+
+### Path integral / Fisher integral
+
+- `integrate_along_path(grad_fn, thetas: list, cumulative=True, offset=0.0)`
+  Trapezoid rule over a 1D path.
+  **Example:** `I = integrate_along_path(lambda a: dIdalpha(a), alphas)  # I[0]=offset`
+
+- `make_log_grid(LogGridConfig) -> np.ndarray`
+  Geometric `t` grid; use with Fisher integral.
+
+- `integrate_mi_log_trapz(t_vals, J_vals, dim_y, T_lower, tail: TailConfig, trace_cov_x=None) -> float`
+  Log-domain trapezoid + tail correction; use with `estimate_fisher_from_score`.
+
+- `estimate_fisher_from_score(score, sampler_x, frontend, t, fisher: FisherConfig, device, noise_conditional=False, stein_calibrate=False) -> float`
+  Monte-Carlo `J(Y_t)=E||s(Y_t)||^2` from a trained score.
+
+### Linear Gaussian baselines (closed-form)
+
+- `mi_linear_gaussian(A, sigma_x2, t, alpha=1.0) -> float`
+  I = (1/2) log det(I + (α²σ_x²/t) A A^T) via Cholesky.
+
+### Utilities
+
+- `project_to_frobenius_ball(A: Tensor, radius: float) -> Tensor`
+  Scale `A` to keep `||A||_F ≤ radius`. Good for constrained ascent.
+
+- `mi_kde_loo_gaussian_pairs(w, y, t, chunk=None) -> float`
+- `estimate_mi_kde_loo(sampler_x, frontend, t, N, device, chunk=None) -> float`
+  KDE-LOO MI baseline (Gaussian kernel, LOO). Use for quick checks.
+
+### Shapes / devices
+
+- `sampler_x(B, device) -> X:(B,n)`; `frontend(X) -> W:(B,m)`; `Y = W + sqrt(t)*Z`.
+  Pass `device` consistently; large `N` uses internal chunking.
+
+### Quick recipes
+
+- **dI/dα (Fig.3)**: train DSM per α → `c = stein_calibrate_scalar(...)` → `estimate_info_grad(..., params=(front.alpha,))` → path integral.
+- **A-optim (Fig.4)**: train DSM per iter → `gA = estimate_info_grad(..., params=(front.A,))` → step & `project_to_frobenius_ball`.
+- **MI via SFB**: per-t DSM → `J(Y_t)` → `integrate_mi_log_trapz` (log-grid + tail).
+
 ## Theory
 
 This implementation is based on two research papers:
