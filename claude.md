@@ -23,14 +23,14 @@ This is a PyTorch library for mutual information estimation and information grad
 
 ### Key Components
 
-- **Core library**: `src/sfblib.py` (~1135 lines)
+- **Core library**: `src/sfblib.py` - Main library with VJP helpers
 - **Example scripts**:
   - `src/comp_MI_identity.py` - Identity channel validation
-  - `src/MI_sfblib.py` - MI curve visualization
-  - `src/MI_tanh.py` - Tanh channel DSM vs KDE-LOO comparison
-  - `src/IG_fig3.py` - Information gradient Figure 3 reproduction
-  - `src/IG_sfblib_vjp.py` - Information gradient with VJP helpers
+  - `src/MI_sfblib.py` - MI curve visualization (identity channel)
+  - `src/MI_tanh.py` - Tanh channel: DSM vs KDE-LOO comparison
+  - `src/IG_sfblib_vjp.py` - Information gradient (reproduces paper Fig.3)
   - `src/A_optim_sfblib.py` - Projected gradient ascent for channel matrix A
+  - `src/path_integral.py` - Path integral MI reconstruction
 
 ### Import Style
 
@@ -43,21 +43,23 @@ import sfblib as sfb
 
 ### Running Experiments
 ```bash
-# Identity channel validation
+# Identity channel validation (< 0.5% error vs theory)
 uv run python src/comp_MI_identity.py
 
-# Generate MI curve
+# Generate MI curve visualization (identity channel)
 uv run python src/MI_sfblib.py
 
-# Tanh channel experiment
+# Nonlinear tanh channel: DSM vs KDE-LOO comparison
 uv run python src/MI_tanh.py
 
-# Information gradient experiments
-uv run python src/IG_fig3.py
+# Information gradient: reproduce paper Fig.3
 uv run python src/IG_sfblib_vjp.py
 
-# Projected gradient ascent for channel matrix A
+# Projected gradient ascent: optimize channel matrix A
 uv run python src/A_optim_sfblib.py
+
+# Path integral MI reconstruction (parameter integration)
+uv run python src/path_integral.py
 ```
 
 ### Adding Dependencies
