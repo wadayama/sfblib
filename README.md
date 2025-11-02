@@ -53,6 +53,9 @@ uv run python src/MI_tanh.py
 
 # Information gradient: reproduce paper Fig.3
 uv run python src/IG_sfblib_vjp.py
+
+# Projected gradient ascent: optimize channel matrix A
+uv run python src/A_optim_sfblib.py
 ```
 
 ### Adding New Packages
@@ -260,7 +263,8 @@ sfblib/
 │   ├── comp_MI_identity.py       # Identity channel validation
 │   ├── MI_sfblib.py              # MI curve visualization (identity)
 │   ├── MI_tanh.py                # Tanh channel: DSM vs KDE-LOO
-│   └── IG_sfblib_vjp.py          # Information gradient (reproduces paper Fig.3)
+│   ├── IG_sfblib_vjp.py          # Information gradient (reproduces paper Fig.3)
+│   └── A_optim_sfblib.py         # Projected gradient ascent for channel matrix A
 ├── README.md                     # This file
 ├── claude.md                     # Instructions for Claude Code
 ├── pyproject.toml                # uv project configuration
