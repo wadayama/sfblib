@@ -1108,6 +1108,69 @@ def estimate_mi_kde_loo(
     return mi_kde_loo_gaussian_pairs(w, y, float(t), chunk=chunk)
 
 # -----------------------------------------------------------------------------
+# Information-gradient helpers (VJP)
+# -----------------------------------------------------------------------------
+
+def vjp_loss(frontend: nn.Module,
+             score_eval: Callable[[torch.Tensor], torch.Tensor],
+             x: torch.Tensor,
+             z: torch.Tensor,
+             t: float,
+             stop_grad: bool = True) -> torch.Tensor:
+    f = frontend(x)
+    y = f + math.sqrt(float(t)) * z
+    s = score_eval(y)
+    if stop_grad:
+        s = s.detach()           # stop-gradient on the score side (Eq.(25))
+    return (f * s).sum(dim=1).mean()
+
+@torch.no_grad()
+def stein_calibrate_scalar(score: nn.Module,
+                           y_sampler: Callable[[int], torch.Tensor],
+                           m: int,
+                           B: int = 8192) -> float:
+    y = y_sampler(B); s = score(y)
+    den = (y * s).sum(dim=1).mean().item()
+    return float(-m / (den + 1e-12))
+
+def estimate_info_grad(
+    frontend: nn.Module,
+    score_eval: Callable[[torch.Tensor], torch.Tensor],
+    sampler_x: Callable[[int, torch.device], torch.Tensor],
+    t: float,
+    N: int,
+    batch_size: int,
+    device: torch.device,
+    params: Optional[Tuple[nn.Parameter, ...]] = None,
+    stop_grad_score: bool = True,
+) -> Dict[str, float]:
+    if params is None:
+        params = tuple(p for p in frontend.parameters() if p.requires_grad)
+    for p in params:
+        if p.grad is not None:
+            p.grad = None
+
+    done = 0
+    while done < N:
+        B = min(batch_size, N - done)
+        x = sampler_x(B, device)
+        with torch.no_grad():
+            m = int(frontend(x[:1]).shape[1])
+        z = torch.randn(B, m, device=device)
+        L = vjp_loss(frontend, score_eval, x, z, t, stop_grad=stop_grad_score)
+        (B / float(N) * L).backward()
+        done += B
+
+    out = {}
+    for name, p in frontend.named_parameters():
+        if p in params and p.grad is not None:
+            g = -p.grad.detach().clone()
+            out[name] = float(g.item()) if g.numel() == 1 else g.cpu().numpy()
+            p.grad = None
+    return out
+
+
+# -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
 
@@ -1138,4 +1201,6 @@ __all__ = [
     "gaussian_awgn_closed_forms", "linear_gaussian_closed_forms",
     # KDE-LOO
     "mi_kde_loo_gaussian_pairs", "estimate_mi_kde_loo",
+    # VJP & Stein calibration
+    "vjp_loss", "stein_calibrate_scalar", "estimate_info_grad",
 ]
