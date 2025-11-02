@@ -61,6 +61,24 @@ uv run python src/A_optim_sfblib.py
 uv run python src/path_integral.py
 ```
 
+### Running Tests
+
+Quick smoke tests to verify core functionality (< 1 second):
+
+```bash
+# Run all tests
+uv run pytest tests/test_smoke.py -v
+
+# Or standalone
+uv run python tests/test_smoke.py
+```
+
+The smoke tests validate:
+- Library imports correctly
+- Identity channel MI matches theory
+- Path integral computation works
+- Stein calibration functions properly
+
 ### Adding New Packages
 
 ```bash
@@ -257,6 +275,8 @@ sfblib/
 │   ├── IG_sfblib_vjp.py          # Information gradient (reproduces paper Fig.3)
 │   ├── A_optim_sfblib.py         # Projected gradient ascent for channel matrix A
 │   └── path_integral.py          # Path integral MI reconstruction
+├── tests/
+│   └── test_smoke.py             # Minimal smoke tests (< 1s)
 ├── README.md                     # This file
 ├── claude.md                     # Instructions for Claude Code
 ├── pyproject.toml                # uv project configuration
