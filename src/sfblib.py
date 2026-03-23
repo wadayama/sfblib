@@ -484,6 +484,9 @@ def estimate_trace_cov_x(sampler_x: Callable[[int, torch.device], torch.Tensor],
     tr Cov(f(X)), not tr Cov(X), because the MI equivalence I(X;Y) = I(W;Y)
     means the asymptotic MMSE is governed by Cov(W).
     """
+    if frontend is not None:
+        frontend = frontend.to(device)
+
     @torch.no_grad()
     def _fn(B: int) -> torch.Tensor:
         x = sampler_x(B, device)
