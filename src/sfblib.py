@@ -851,6 +851,55 @@ def mi_linear_gaussian(A: torch.Tensor, sigma_x2: float, t: float) -> float:
         return float(0.5 * logdet.item())
 
 
+def mi_gaussian_upper_bound(
+    sampler_x: Callable[[int, torch.device], torch.Tensor],
+    frontend: nn.Module,
+    t: float,
+    device: torch.device,
+    N: int = 100_000,
+) -> float:
+    """
+    Sample-covariance-based Gaussian output upper bound on I(X; Y_t).
+
+    Channel: Y_t = frontend(X) + Z_t,  Z_t ~ N(0, t I_n).
+
+    Computes  Û_cov = ½ log det(I + K̂_W / t)  where W = frontend(X)
+    and K̂_W is the unbiased sample covariance of W.
+
+    This provides a lightweight sanity check for SFB estimates:
+    a reliable SFB estimate should satisfy I_SFB ≲ Û_cov.
+
+    Parameters
+    ----------
+    sampler_x : callable(batch_size, device) -> Tensor
+        Sampler for the input X.
+    frontend : nn.Module
+        Deterministic mapping f such that W = f(X).
+    t : float
+        Noise variance (scalar, isotropic).
+    device : torch.device
+        Computation device.
+    N : int
+        Number of samples for covariance estimation (default 100,000).
+
+    Returns
+    -------
+    float
+        Upper bound on I(X; Y_t) in nats.
+    """
+    with torch.no_grad():
+        x = sampler_x(N, device)
+        w = frontend.to(device)(x)
+        n = w.shape[1]
+        w_mean = w.mean(dim=0)
+        w_centered = w - w_mean
+        K_W = (w_centered.T @ w_centered) / (N - 1)
+        M = torch.eye(n, device=device) + K_W / t
+        L = torch.linalg.cholesky(M)
+        logdet = 2.0 * torch.log(torch.diag(L)).sum()
+        return float(0.5 * logdet.item())
+
+
 # -----------------------------------------------------------------------------
 # Backward-compat thin wrappers (optional). These call the generic trainer.
 # -----------------------------------------------------------------------------
@@ -1133,7 +1182,7 @@ __all__ = [
     # advanced
     "integrate_along_path",
     # utilities
-    "project_to_frobenius_ball", "mi_linear_gaussian",
+    "project_to_frobenius_ball", "mi_linear_gaussian", "mi_gaussian_upper_bound",
     # KDE-LOO
     "mi_kde_loo_gaussian_pairs", "estimate_mi_kde_loo",
 ]
