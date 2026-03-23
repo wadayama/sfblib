@@ -154,6 +154,19 @@ result = sfb.estimate_mi_forward(
 print(f"Estimated MI: {result['I_hat']:.4f} nats")
 ```
 
+### Validating SFB Estimates with Gaussian Upper Bound
+
+```python
+# After obtaining an SFB estimate, check it against the Gaussian upper bound
+ub = sfb.mi_gaussian_upper_bound(sampler_x, frontend, t=0.5, device=device)
+print(f"Gaussian upper bound: {ub:.4f} nats")
+print(f"SFB estimate:         {result['I_hat']:.4f} nats")
+print(f"SFB ≤ UB: {result['I_hat'] <= ub}")
+```
+
+The Gaussian upper bound provides a lightweight sanity check for SFB estimates.
+If I_SFB substantially exceeds the upper bound, the estimate may be unreliable.
+
 ### Information Gradient Computation
 
 Compute gradients of mutual information with respect to channel parameters:
@@ -231,6 +244,12 @@ print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 - `mi_linear_gaussian(A, sigma_x2, t) -> float`
   I = (1/2) log det(I + (σ_x²/t) A A^T) via Cholesky.
 
+### Gaussian upper bound (sanity check)
+
+- `mi_gaussian_upper_bound(sampler_x, frontend, t, device, N=100_000) -> float`
+  Sample-covariance-based Gaussian output upper bound: Û_cov = ½ log det(I + K̂_W / t) where W = frontend(X).
+  A reliable SFB estimate should satisfy I_SFB ≲ Û_cov.
+
 ### Utilities
 
 - `project_to_frobenius_ball(A: Tensor, radius: float) -> Tensor`
@@ -250,6 +269,7 @@ print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 - **dI/dα (Fig.3)**: train DSM per α → `c = stein_calibrate_scalar(...)` → `estimate_info_grad(..., params=(front.alpha,))` → path integral.
 - **A-optim (Fig.4)**: train DSM per iter → `gA = estimate_info_grad(..., params=(front.A,))` → step & `project_to_frobenius_ball`.
 - **MI via SFB**: per-t DSM → `J(Y_t)` → `integrate_mi_log_trapz` (log-grid + tail).
+- **Sanity check**: `ub = mi_gaussian_upper_bound(sampler_x, frontend, t, device)` → verify `I_SFB ≲ ub`.
 
 ## Theory
 
