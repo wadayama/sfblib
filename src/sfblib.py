@@ -474,14 +474,21 @@ def integrate_mi_log_trapz(
 # -----------------------------------------------------------------------------
 
 def estimate_trace_cov_x(sampler_x: Callable[[int, torch.device], torch.Tensor],
-                         device: torch.device, samples: int = 50_000) -> float:
+                         device: torch.device, samples: int = 50_000,
+                         frontend: Optional[nn.Module] = None) -> float:
     """
-    Estimate tr Cov(X) from samples for tail correction (main Eq.(45)).  
+    Estimate tr Cov(W) from samples for tail correction (main Eq.(45)),
+    where W = frontend(X) if frontend is given, otherwise W = X.
+
+    For nonlinear channels Y = f(X) + Z, the tail correction requires
+    tr Cov(f(X)), not tr Cov(X), because the MI equivalence I(X;Y) = I(W;Y)
+    means the asymptotic MMSE is governed by Cov(W).
     """
     @torch.no_grad()
     def _fn(B: int) -> torch.Tensor:
         x = sampler_x(B, device)
-        return (x ** 2).sum(dim=-1, keepdim=True)
+        w = frontend(x) if frontend is not None else x
+        return (w ** 2).sum(dim=-1, keepdim=True)
 
     tr_cov = mc_expect(_fn, N=samples, reduce="mean").item()
     return float(tr_cov)
@@ -582,7 +589,7 @@ def estimate_mi_forward(
         raise ValueError("conditional must be 'per_t' or 'noise_cond'.")
 
     J_arr = np.asarray(J_list, dtype=np.float64)
-    tr_cov_x = estimate_trace_cov_x(sampler_x, device, samples=tail.cov_trace_est_samples) if tail.use_tail else None
+    tr_cov_x = estimate_trace_cov_x(sampler_x, device, samples=tail.cov_trace_est_samples, frontend=channel.frontend) if tail.use_tail else None
     I_hat = integrate_mi_log_trapz(t_vals, J_arr, dim_y=m, T_lower=t_grid.T_lower, tail=tail, trace_cov_x=tr_cov_x)
 
     return {
