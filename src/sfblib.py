@@ -519,8 +519,9 @@ def estimate_fisher_from_score(
         return y
 
     if stein_calibrate:
+        m = _y_sampler(1).shape[1]
         c = stein_calibrate_scalar(lambda yy: score(yy, t) if noise_conditional else score(yy),
-                                   _y_sampler, B=8192)
+                                   _y_sampler, m=m, B=8192)
         def _score_eval(y):  # scaled score
             return c * (score(y, t) if noise_conditional else score(y))
     else:
@@ -630,7 +631,8 @@ def info_gradient(
         def _y_sampler(B: int) -> torch.Tensor:
             _, _, yy = simulate_y(channel, t, B, device)
             return yy
-        c = stein_calibrate_scalar(lambda yy: score_model(yy, t) if noise_conditional else score_model(yy), _y_sampler, B=batch_size)
+        m = y.shape[1]
+        c = stein_calibrate_scalar(lambda yy: score_model(yy, t) if noise_conditional else score_model(yy), _y_sampler, m=m, B=batch_size)
     else:
         c = 1.0
 
@@ -669,7 +671,8 @@ def task_info_gradient(
         def _y_sampler(B: int) -> torch.Tensor:
             _, _, yy = simulate_y(channel, t, B, device)
             return yy
-        c = stein_calibrate_scalar(lambda yy: score_uncond(yy, t) if noise_conditional else score_uncond(yy), _y_sampler, B=batch_size)
+        m = y.shape[1]
+        c = stein_calibrate_scalar(lambda yy: score_uncond(yy, t) if noise_conditional else score_uncond(yy), _y_sampler, m=m, B=batch_size)
     else:
         c = 1.0
 
@@ -709,7 +712,8 @@ def ib_gradient(
         def _y_sampler(B: int) -> torch.Tensor:
             _, _, yy = simulate_y(channel, t, B, device)
             return yy
-        c = stein_calibrate_scalar(lambda yy: score_uncond(yy, t) if noise_conditional else score_uncond(yy), _y_sampler, B=batch_size)
+        m = y.shape[1]
+        c = stein_calibrate_scalar(lambda yy: score_uncond(yy, t) if noise_conditional else score_uncond(yy), _y_sampler, m=m, B=batch_size)
     else:
         c = 1.0
 
