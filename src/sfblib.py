@@ -636,8 +636,9 @@ def info_gradient(
     else:
         c = 1.0
 
-    s_y = c * (score_model(y, t) if noise_conditional else score_model(y))
-    loss = vjp_loss(frontend, s_y, x, stop_grad=True)
+    score_fn = lambda yy: c * (score_model(yy, t) if noise_conditional else score_model(yy))
+    z = (y - w) / math.sqrt(float(t))
+    loss = vjp_loss(frontend, score_fn, x, z, float(t), stop_grad=True)
     # Compute grads w.r.t. frontend params
     for p in frontend.parameters():
         if p.grad is not None:
@@ -676,10 +677,13 @@ def task_info_gradient(
     else:
         c = 1.0
 
-    sY = c * (score_uncond(y, t) if noise_conditional else score_uncond(y))
-    sY_T = c * score_cond(y, tau)
+    def _score_diff(yy):
+        sY = c * (score_uncond(yy, t) if noise_conditional else score_uncond(yy))
+        sY_T = c * score_cond(yy, tau)
+        return sY_T - sY
 
-    loss = vjp_loss(frontend, (sY_T - sY), x, stop_grad=True)
+    z = (y - w) / math.sqrt(float(t))
+    loss = vjp_loss(frontend, _score_diff, x, z, float(t), stop_grad=True)
     for p in frontend.parameters():
         if p.grad is not None:
             p.grad.zero_()
@@ -717,11 +721,13 @@ def ib_gradient(
     else:
         c = 1.0
 
-    sY = c * (score_uncond(y, t) if noise_conditional else score_uncond(y))
-    sY_T = c * score_cond(y, tau)
+    def _score_ib(yy):
+        sY = c * (score_uncond(yy, t) if noise_conditional else score_uncond(yy))
+        sY_T = c * score_cond(yy, tau)
+        return sY_T + (beta - 1.0) * sY
 
-    vec = sY_T + (beta - 1.0) * sY
-    loss = vjp_loss(frontend, vec, x, stop_grad=True)
+    z = (y - w) / math.sqrt(float(t))
+    loss = vjp_loss(frontend, _score_ib, x, z, float(t), stop_grad=True)
     for p in frontend.parameters():
         if p.grad is not None:
             p.grad.zero_()
