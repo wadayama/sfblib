@@ -110,6 +110,31 @@ def simulate_y(channel: ChannelSpec, t: float, batch_size: int, device: torch.de
 
 
 # -----------------------------------------------------------------------------
+# Flow matching: time conversion (t ↔ τ)
+# -----------------------------------------------------------------------------
+
+def t_to_tau(t: float) -> float:
+    """SFB noise variance *t* → flow matching time τ = √t / (1 + √t)."""
+    st = math.sqrt(t)
+    return st / (1.0 + st)
+
+
+def t_to_tau_tensor(t: torch.Tensor) -> torch.Tensor:
+    """Batched conversion: t tensor → τ tensor."""
+    st = torch.sqrt(t)
+    return st / (1.0 + st)
+
+
+def velocity_to_score(v: torch.Tensor, x_tau: torch.Tensor, tau: float) -> torch.Tensor:
+    """Convert velocity *v* and interpolated point *x_τ* to score s_A at flow time τ.
+
+    s_B = -((1-τ)·v + x_τ) / τ;  s_A = (1-τ)·s_B.
+    """
+    s_B = -((1.0 - tau) * v + x_tau) / tau
+    return (1.0 - tau) * s_B
+
+
+# -----------------------------------------------------------------------------
 # Score networks (MLPs) & t-embedding
 # -----------------------------------------------------------------------------
 
@@ -211,6 +236,52 @@ class CondTaskScoreNet(nn.Module):
         return self.net(h)
 
 
+class VelocityNetMLP(nn.Module):
+    """Velocity field v(x_τ, τ) for flow matching.  τ is embedded via FourierTEmbedding."""
+
+    def __init__(self, dim: int, hidden: int = 128, layers: int = 3,
+                 activation: str = "silu", t_embed_dim: int = 32):
+        super().__init__()
+        self.temb = FourierTEmbedding(embed_dim=t_embed_dim)
+        act = _activation(activation)
+        mods = []
+        in_dim = dim + t_embed_dim
+        for _ in range(layers):
+            mods += [nn.Linear(in_dim, hidden),
+                     nn.SiLU() if act == F.silu else nn.GELU() if act == F.gelu else nn.ReLU()]
+            in_dim = hidden
+        mods += [nn.Linear(in_dim, dim)]
+        self.net = nn.Sequential(*mods)
+
+    def forward(self, x_tau: torch.Tensor, tau: torch.Tensor | float) -> torch.Tensor:
+        """x_tau: (B, dim), tau: scalar or (B,) → v: (B, dim)."""
+        if not torch.is_tensor(tau):
+            tau = torch.full((x_tau.shape[0],), float(tau), dtype=x_tau.dtype, device=x_tau.device)
+        emb = self.temb(tau)
+        if emb.shape[0] != x_tau.shape[0]:
+            emb = emb.expand(x_tau.shape[0], -1)
+        return self.net(torch.cat([x_tau, emb], dim=-1))
+
+
+class FlowMatchingScoreAdapter(nn.Module):
+    """Wrap a trained velocity net to produce score s_A(y) at a specific noise variance t.
+
+    Internally converts t → τ and applies the velocity-to-score formula.
+    """
+
+    def __init__(self, velocity_net: VelocityNetMLP, tau: float):
+        super().__init__()
+        self.velocity_net = velocity_net
+        self.tau = tau
+
+    @torch.no_grad()
+    def forward(self, y: torch.Tensor) -> torch.Tensor:
+        tau = self.tau
+        x_tau = (1.0 - tau) * y
+        v = self.velocity_net(x_tau, tau)
+        return velocity_to_score(v, x_tau, tau)
+
+
 # -----------------------------------------------------------------------------
 # Config dataclasses
 # -----------------------------------------------------------------------------
@@ -227,7 +298,21 @@ class DSMConfig:
     scheme: str = "per_t"       # "per_t" or "noise_cond"  (main Eq.(41)) 
     t_embed_dim: int = 32
     weight_decay: float = 0.0
-    stein_calibrate: bool = False   # Optional scale calibration at evaluation (info_grad Sec.VII). 
+    stein_calibrate: bool = False   # Optional scale calibration at evaluation (info_grad Sec.VII).
+
+@dataclass
+class FMConfig:
+    """Configuration for flow matching (CFM) velocity field training."""
+    lr: float = 1e-3
+    steps: int = 300
+    batch_size: int = 4096
+    hidden: int = 128
+    layers: int = 3
+    activation: str = "silu"
+    grad_clip: float = 1.0
+    scheme: str = "fm_noise_cond"  # "fm_per_t" or "fm_noise_cond"
+    t_embed_dim: int = 32
+    weight_decay: float = 0.0
 
 @dataclass
 class LogGridConfig:
@@ -290,6 +375,37 @@ def dsm_loss_conditional(score: Callable[[torch.Tensor, torch.Tensor], torch.Ten
     target = (y - w) / t
     pred = score(y, tau)
     return F.mse_loss(pred + target, torch.zeros_like(pred))
+
+
+# -----------------------------------------------------------------------------
+# CFM losses (flow matching)
+# -----------------------------------------------------------------------------
+
+def cfm_loss_per_t(velocity_net: Callable[[torch.Tensor, float], torch.Tensor],
+                   w: torch.Tensor, t: float) -> torch.Tensor:
+    """Conditional Flow Matching loss at fixed SFB noise variance *t*.
+
+    Internally converts *t* → τ, then:
+      x_τ = (1-τ)·w + τ·z,  target = z - w,  loss = MSE(v(x_τ, τ), target).
+    """
+    tau = t_to_tau(t)
+    z = torch.randn_like(w)
+    x_tau = (1.0 - tau) * w + tau * z
+    target = z - w
+    v_pred = velocity_net(x_tau, tau)
+    return F.mse_loss(v_pred, target)
+
+
+def cfm_loss_noise_cond(velocity_net: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+                        w: torch.Tensor, t_vec: torch.Tensor) -> torch.Tensor:
+    """Noise-conditional CFM loss.  *t_vec* is a (B,) tensor of SFB noise variances."""
+    tau_vec = t_to_tau_tensor(t_vec)
+    z = torch.randn_like(w)
+    tau_col = tau_vec.unsqueeze(1)
+    x_tau = (1.0 - tau_col) * w + tau_col * z
+    target = z - w
+    v_pred = velocity_net(x_tau, tau_vec)
+    return F.mse_loss(v_pred, target)
 
 
 # -----------------------------------------------------------------------------
@@ -542,10 +658,17 @@ def estimate_mi_forward(
     fisher: FisherConfig,
     tail: TailConfig,
     device: torch.device,
-    conditional: str = "per_t"
+    conditional: str = "per_t",
+    fm: Optional[FMConfig] = None,
 ) -> Dict[str, Any]:
     """
-    Full pipeline: DSM  Fisher  MI (main Eq.(24),(27),(29),(41),(43)-(45)).  
+    Full pipeline: score learning → Fisher → MI (main Eq.(24),(27),(29),(41),(43)-(45)).
+
+    *conditional* selects the method:
+      - ``"per_t"``        DSM per-t (original)
+      - ``"noise_cond"``   DSM noise-conditional (original)
+      - ``"fm_per_t"``     Flow matching per-t  (requires *fm*)
+      - ``"fm_noise_cond"`` Flow matching noise-conditional (requires *fm*)
     """
     channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device))
     t_vals = make_log_grid(t_grid)
@@ -556,10 +679,8 @@ def estimate_mi_forward(
     if conditional == "per_t":
         # train separate score per t
         for t in t_vals:
-            # model
             model = ScoreNetMLP(dim=channel.y_dim or sampler_x(1, device).shape[1],
                                 hidden=dsm.hidden, layers=dsm.layers, activation=dsm.activation).to(device)
-            # train
             model = train_score_generic(
                 make_model=lambda: model,
                 loss_fn=lambda mdl, w, tt: dsm_loss_uncond(mdl, w, float(tt)),
@@ -568,12 +689,11 @@ def estimate_mi_forward(
                 lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
             )
             m = channel.y_dim or sampler_x(1, device).shape[1]
-            # fisher
             Jt = estimate_fisher_from_score(model, sampler_x, frontend, float(t), fisher, device,
                                             noise_conditional=False, stein_calibrate=dsm.stein_calibrate)
             J_list.append(Jt)
+
     elif conditional == "noise_cond":
-        # one conditional model for all t
         model = NoiseCondScoreNet(dim=channel.y_dim or sampler_x(1, device).shape[1],
                                   hidden=dsm.hidden, layers=dsm.layers,
                                   activation=dsm.activation, t_embed_dim=dsm.t_embed_dim).to(device)
@@ -589,8 +709,35 @@ def estimate_mi_forward(
             Jt = estimate_fisher_from_score(model, sampler_x, frontend, float(t), fisher, device,
                                             noise_conditional=True, stein_calibrate=dsm.stein_calibrate)
             J_list.append(Jt)
+
+    elif conditional == "fm_per_t":
+        if fm is None:
+            raise ValueError("FMConfig (fm=) is required for conditional='fm_per_t'.")
+        for t in t_vals:
+            vel_net = train_fm_per_t(sampler_x, frontend, float(t), fm, device)
+            tau = t_to_tau(float(t))
+            adapter = FlowMatchingScoreAdapter(vel_net, tau)
+            m = channel.y_dim or sampler_x(1, device).shape[1]
+            Jt = estimate_fisher_from_score(adapter, sampler_x, frontend, float(t), fisher, device,
+                                            noise_conditional=False, stein_calibrate=False)
+            J_list.append(Jt)
+
+    elif conditional == "fm_noise_cond":
+        if fm is None:
+            raise ValueError("FMConfig (fm=) is required for conditional='fm_noise_cond'.")
+        vel_net = train_fm_noise_cond(sampler_x, frontend, float(t_grid.t_min), float(t_grid.t_max),
+                                      fm, device)
+        m = channel.y_dim or sampler_x(1, device).shape[1]
+        for t in t_vals:
+            tau = t_to_tau(float(t))
+            adapter = FlowMatchingScoreAdapter(vel_net, tau)
+            Jt = estimate_fisher_from_score(adapter, sampler_x, frontend, float(t), fisher, device,
+                                            noise_conditional=False, stein_calibrate=False)
+            J_list.append(Jt)
+
     else:
-        raise ValueError("conditional must be 'per_t' or 'noise_cond'.")
+        raise ValueError(f"Unknown conditional='{conditional}'. "
+                         "Choose from 'per_t', 'noise_cond', 'fm_per_t', 'fm_noise_cond'.")
 
     J_arr = np.asarray(J_list, dtype=np.float64)
     tr_cov_x = estimate_trace_cov_x(sampler_x, device, samples=tail.cov_trace_est_samples, frontend=channel.frontend) if tail.use_tail else None
@@ -603,7 +750,6 @@ def estimate_mi_forward(
         "meta": {
             "dim_y": m,
             "conditional": conditional,
-            "stein_calibrate": dsm.stein_calibrate,
         }
     }
 
@@ -991,6 +1137,61 @@ def train_dsm_conditional_task(
         lr=dsm.lr, grad_clip=dsm.grad_clip, weight_decay=dsm.weight_decay
     )
     return model
+
+
+# -----------------------------------------------------------------------------
+# Flow matching training wrappers
+# -----------------------------------------------------------------------------
+
+def train_fm_per_t(
+    sampler_x: Callable[[int, torch.device], torch.Tensor],
+    frontend: nn.Module,
+    t: float,
+    fm: FMConfig,
+    device: torch.device,
+    y_dim: Optional[int] = None
+) -> nn.Module:
+    """Train a VelocityNetMLP at a single SFB noise variance *t* using CFM loss."""
+    channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device), y_dim=y_dim)
+    def _make():
+        return VelocityNetMLP(dim=channel.y_dim or sampler_x(1, device).shape[1],
+                              hidden=fm.hidden, layers=fm.layers,
+                              activation=fm.activation, t_embed_dim=fm.t_embed_dim).to(device)
+    model = train_score_generic(
+        make_model=_make,
+        loss_fn=lambda mdl, w, tt: cfm_loss_per_t(mdl, w, float(tt)),
+        channel=channel, device=device, t=float(t),
+        steps=fm.steps, batch_size=fm.batch_size,
+        lr=fm.lr, grad_clip=fm.grad_clip, weight_decay=fm.weight_decay
+    )
+    return model
+
+
+def train_fm_noise_cond(
+    sampler_x: Callable[[int, torch.device], torch.Tensor],
+    frontend: nn.Module,
+    t_min: float,
+    t_max: float,
+    fm: FMConfig,
+    device: torch.device,
+    y_dim: Optional[int] = None
+) -> nn.Module:
+    """Train a single noise-conditional VelocityNetMLP across [t_min, t_max] using CFM loss."""
+    channel = ChannelSpec(sampler_x=sampler_x, frontend=frontend.to(device), y_dim=y_dim)
+    def _make():
+        return VelocityNetMLP(dim=channel.y_dim or sampler_x(1, device).shape[1],
+                              hidden=fm.hidden, layers=fm.layers,
+                              activation=fm.activation, t_embed_dim=fm.t_embed_dim).to(device)
+    model = train_score_generic(
+        make_model=_make,
+        loss_fn=lambda mdl, w, t_vec: cfm_loss_noise_cond(mdl, w, t_vec),
+        channel=channel, device=device, t=(float(t_min), float(t_max)),
+        steps=fm.steps, batch_size=fm.batch_size,
+        lr=fm.lr, grad_clip=fm.grad_clip, weight_decay=fm.weight_decay
+    )
+    return model
+
+
 # -----------------------------------------------------------------------------
 # KDE-LOO Mutual Information (Gaussian kernel) - reusable baseline
 # Implements Eq. (50) for Y_t = W + sqrt(t) Z with a Gaussian kernel.
@@ -1174,11 +1375,17 @@ __all__ = [
     "ChannelSpec", "simulate_y",
     # models
     "ScoreNetMLP", "NoiseCondScoreNet", "CondTaskScoreNet",
+    "VelocityNetMLP", "FlowMatchingScoreAdapter",
+    # flow matching utils
+    "t_to_tau", "t_to_tau_tensor", "velocity_to_score",
     # configs
-    "DSMConfig", "LogGridConfig", "FisherConfig", "TailConfig",
+    "DSMConfig", "FMConfig", "LogGridConfig", "FisherConfig", "TailConfig",
     # DSM core & train
     "dsm_loss_uncond", "dsm_loss_noise_cond", "dsm_loss_conditional", "train_score_generic",
     "train_dsm_uncond", "train_dsm_noise_cond", "train_dsm_conditional_task",
+    # CFM core & train
+    "cfm_loss_per_t", "cfm_loss_noise_cond",
+    "train_fm_per_t", "train_fm_noise_cond",
     # MC & Fisher/MMSE
     "mc_expect", "fisher_from_score", "mmse_from_fisher", "fisher_from_mmse",
     # integration

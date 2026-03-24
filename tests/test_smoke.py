@@ -93,6 +93,67 @@ def test_stein_calibrate_scalar_basic():
     print(f"✓ Stein calibration test passed: c={c:.4f}")
 
 
+def test_fm_imports():
+    """Test that all flow matching symbols are exported."""
+    for name in [
+        "t_to_tau", "t_to_tau_tensor", "velocity_to_score",
+        "VelocityNetMLP", "FlowMatchingScoreAdapter", "FMConfig",
+        "cfm_loss_per_t", "cfm_loss_noise_cond",
+        "train_fm_per_t", "train_fm_noise_cond",
+    ]:
+        assert hasattr(sfb, name), f"Missing export: {name}"
+    print("✓ FM import test passed")
+
+
+def test_t_to_tau():
+    """Test t ↔ τ conversion at known values."""
+    # t=1 → √1/(1+√1) = 0.5
+    assert abs(sfb.t_to_tau(1.0) - 0.5) < 1e-10
+    # t=0 edge → τ=0
+    assert abs(sfb.t_to_tau(0.0)) < 1e-10
+    # t=4 → 2/(1+2) = 2/3
+    assert abs(sfb.t_to_tau(4.0) - 2.0 / 3.0) < 1e-10
+
+    # tensor version
+    t_tensor = torch.tensor([1.0, 4.0])
+    tau_tensor = sfb.t_to_tau_tensor(t_tensor)
+    assert abs(tau_tensor[0].item() - 0.5) < 1e-6
+    assert abs(tau_tensor[1].item() - 2.0 / 3.0) < 1e-6
+    print("✓ t_to_tau test passed")
+
+
+def test_cfm_loss_runs():
+    """Test that CFM loss functions return scalar tensors."""
+    dim = 4
+    B = 32
+    net = sfb.VelocityNetMLP(dim=dim, hidden=16, layers=2)
+    w = torch.randn(B, dim)
+
+    # per-t loss
+    loss_pt = sfb.cfm_loss_per_t(net, w, t=1.0)
+    assert loss_pt.dim() == 0, f"Expected scalar, got shape {loss_pt.shape}"
+    assert loss_pt.item() > 0
+
+    # noise-cond loss
+    t_vec = torch.rand(B) * 2.0 + 0.1
+    loss_nc = sfb.cfm_loss_noise_cond(net, w, t_vec)
+    assert loss_nc.dim() == 0, f"Expected scalar, got shape {loss_nc.shape}"
+    assert loss_nc.item() > 0
+    print("✓ CFM loss test passed")
+
+
+def test_fm_adapter_shape():
+    """Test that FlowMatchingScoreAdapter outputs the correct shape."""
+    dim = 4
+    B = 16
+    net = sfb.VelocityNetMLP(dim=dim, hidden=16, layers=2)
+    adapter = sfb.FlowMatchingScoreAdapter(net, tau=0.5)
+    y = torch.randn(B, dim)
+    s = adapter(y)
+    assert s.shape == (B, dim), f"Expected ({B}, {dim}), got {s.shape}"
+    print("✓ FM adapter shape test passed")
+
+
 if __name__ == "__main__":
     print("Running sfblib smoke tests...\n")
 
@@ -100,5 +161,9 @@ if __name__ == "__main__":
     test_identity_channel_lightweight()
     test_integrate_along_path_simple()
     test_stein_calibrate_scalar_basic()
+    test_fm_imports()
+    test_t_to_tau()
+    test_cfm_loss_runs()
+    test_fm_adapter_shape()
 
     print("\n✅ All smoke tests passed!")

@@ -5,6 +5,7 @@ PyTorch-based library for mutual information estimation and information gradient
 ## Features
 
 - **Mutual Information Estimation** via Score-to-Fisher Bridge (SFB) methodology
+- **Flow Matching (FM)** as an alternative to DSM for score learning — train a single velocity model and convert to score via the velocity-to-score bridge
 - **Information Gradient Computation** using VJP (Vector-Jacobian Product)
 - **Denoising Score Matching (DSM)** for score function learning
 - **Task-Oriented Extensions** for semantic communication
@@ -51,6 +52,12 @@ uv run python src/MI_sfblib.py
 # Nonlinear tanh channel: DSM vs KDE-LOO comparison
 uv run python src/MI_tanh.py
 
+# Flow Matching: identity channel verification (FM vs analytical)
+uv run python src/MI_fm_identity.py
+
+# Flow Matching: tanh channel verification (FM vs DSM vs KDE-LOO)
+uv run python src/MI_fm_tanh.py
+
 # Information gradient: reproduce paper Fig.3
 uv run python src/IG_sfblib_vjp.py
 
@@ -74,10 +81,11 @@ uv run python tests/test_smoke.py
 ```
 
 The smoke tests validate:
-- Library imports correctly
+- Library imports correctly (including FM symbols)
 - Identity channel MI matches theory
 - Path integral computation works
 - Stein calibration functions properly
+- Flow matching: t-to-tau conversion, CFM loss, score adapter shape
 
 ### Adding New Packages
 
@@ -140,7 +148,7 @@ dsm_config = sfb.DSMConfig(
 fisher_config = sfb.FisherConfig(mc_samples=100000)
 tail_config = sfb.TailConfig(use_tail=True)
 
-# Run MI estimation
+# Run MI estimation (DSM-based)
 result = sfb.estimate_mi_forward(
     sampler_x=sampler_x,
     frontend=frontend,
@@ -151,7 +159,37 @@ result = sfb.estimate_mi_forward(
     device=device
 )
 
-print(f"Estimated MI: {result['I_hat']:.4f} nats")
+print(f"Estimated MI (DSM): {result['I_hat']:.4f} nats")
+```
+
+### Flow Matching MI Estimation
+
+Flow matching learns a velocity field instead of a score function, then converts
+velocity to score via the velocity-to-score bridge. A single noise-conditional
+model covers all noise levels.
+
+```python
+fm_config = sfb.FMConfig(
+    lr=1e-3,
+    steps=3000,
+    batch_size=8192,
+    hidden=128,
+    layers=3,
+)
+
+result_fm = sfb.estimate_mi_forward(
+    sampler_x=sampler_x,
+    frontend=frontend,
+    t_grid=grid_config,
+    dsm=dsm_config,       # unused but required for signature
+    fisher=fisher_config,
+    tail=tail_config,
+    device=device,
+    conditional="fm_noise_cond",  # or "fm_per_t"
+    fm=fm_config,
+)
+
+print(f"Estimated MI (FM): {result_fm['I_hat']:.4f} nats")
 ```
 
 ### Validating SFB Estimates with Gaussian Upper Bound
@@ -214,8 +252,20 @@ print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 - `DSMConfig(steps=1000, batch_size=4096, lr=1e-3, hidden=256, layers=2, activation="silu", grad_clip=1.0)`
   Config for DSM training.
 
+- `FMConfig(steps=3000, batch_size=8192, lr=1e-3, hidden=128, layers=3, activation="silu", grad_clip=1.0, t_embed_dim=32)`
+  Config for flow matching (CFM) velocity training.
+
 - `train_dsm_uncond(sampler_x, frontend, t, dsm: DSMConfig, device, y_dim=None) -> nn.Module`
   Train **unconditional** score `s(y)` at fixed noise variance `t`. Returns `score(y)`.
+
+- `train_fm_noise_cond(sampler_x, frontend, t_min, t_max, fm: FMConfig, device, y_dim=None) -> nn.Module`
+  Train a single **noise-conditional velocity** model `v(x_tau, tau)` across `[t_min, t_max]`. Returns `VelocityNetMLP`.
+
+- `train_fm_per_t(sampler_x, frontend, t, fm: FMConfig, device, y_dim=None) -> nn.Module`
+  Train a **per-t velocity** model at fixed noise variance `t`. Returns `VelocityNetMLP`.
+
+- `FlowMatchingScoreAdapter(velocity_net, tau) -> nn.Module`
+  Wraps a velocity net to produce `score(y)` at a specific flow time `tau`. Use `t_to_tau(t)` to convert.
 
 - `estimate_info_grad(frontend, score_eval, sampler_x, t, N, batch_size, device, params=None, stop_grad_score=True) -> dict[str, float|np.ndarray]`
   VJP-based info gradient w.r.t. `params` (e.g. `(frontend.alpha,)` or `(frontend.A,)`).
@@ -268,7 +318,8 @@ print(f"∂I/∂α = {grad_dict['alpha']:.4f}")
 
 - **dI/dα (Fig.3)**: train DSM per α → `c = stein_calibrate_scalar(...)` → `estimate_info_grad(..., params=(front.alpha,))` → path integral.
 - **A-optim (Fig.4)**: train DSM per iter → `gA = estimate_info_grad(..., params=(front.A,))` → step & `project_to_frobenius_ball`.
-- **MI via SFB**: per-t DSM → `J(Y_t)` → `integrate_mi_log_trapz` (log-grid + tail).
+- **MI via SFB (DSM)**: per-t DSM → `J(Y_t)` → `integrate_mi_log_trapz` (log-grid + tail).
+- **MI via SFB (FM)**: `train_fm_noise_cond(...)` → `FlowMatchingScoreAdapter(vel_net, t_to_tau(t))` per grid point → `estimate_fisher_from_score` → `integrate_mi_log_trapz`. Or simply `estimate_mi_forward(..., conditional="fm_noise_cond", fm=fm_config)`.
 - **Sanity check**: `ub = mi_gaussian_upper_bound(sampler_x, frontend, t, device)` → verify `I_SFB ≲ ub`.
 
 ## Theory
@@ -298,6 +349,7 @@ I(X; YT) = (1/2) ∫_T^∞ [n/t - J(Yt)] dt
 - Log-domain trapezoid integration (Eq. 43-44)
 - Tail correction for high noise (Eq. 45)
 - Per-t DSM or noise-conditional DSM (Eq. 27, 41)
+- Flow matching alternative: learn velocity v(x_tau, tau) via CFM, convert to score via velocity-to-score bridge
 
 ### Channel Model
 
@@ -350,15 +402,17 @@ device = torch.device("cpu")
 ```
 sfblib/
 ├── src/
-│   ├── sfblib.py                 # Core library with VJP helpers
+│   ├── sfblib.py                 # Core library (DSM + FM + VJP helpers)
 │   ├── comp_MI_identity.py       # Identity channel validation
-│   ├── MI_sfblib.py              # MI curve visualization (identity)
+│   ├── MI_sfblib.py              # MI curve visualization (identity, DSM)
 │   ├── MI_tanh.py                # Tanh channel: DSM vs KDE-LOO
+│   ├── MI_fm_identity.py         # FM verification: identity channel vs analytical
+│   ├── MI_fm_tanh.py             # FM verification: tanh channel (FM vs DSM vs KDE-LOO)
 │   ├── IG_sfblib_vjp.py          # Information gradient (reproduces paper Fig.3)
 │   ├── A_optim_sfblib.py         # Projected gradient ascent for channel matrix A
 │   └── path_integral.py          # Path integral MI reconstruction
 ├── tests/
-│   └── test_smoke.py             # Minimal smoke tests (< 1s)
+│   └── test_smoke.py             # Smoke tests: DSM + FM (< 2s)
 ├── README.md                     # This file
 ├── claude.md                     # Instructions for Claude Code
 ├── pyproject.toml                # uv project configuration

@@ -23,14 +23,17 @@ This is a PyTorch library for mutual information estimation and information grad
 
 ### Key Components
 
-- **Core library**: `src/sfblib.py` - Main library with VJP helpers
-- **Example scripts**:
+- **Core library**: `src/sfblib.py` - Main library (DSM + FM + VJP helpers)
+- **Example scripts (DSM)**:
   - `src/comp_MI_identity.py` - Identity channel validation
   - `src/MI_sfblib.py` - MI curve visualization (identity channel)
   - `src/MI_tanh.py` - Tanh channel: DSM vs KDE-LOO comparison
   - `src/IG_sfblib_vjp.py` - Information gradient (reproduces paper Fig.3)
   - `src/A_optim_sfblib.py` - Projected gradient ascent for channel matrix A
   - `src/path_integral.py` - Path integral MI reconstruction
+- **Verification scripts (Flow Matching)**:
+  - `src/MI_fm_identity.py` - FM MI estimation vs analytical (identity channel)
+  - `src/MI_fm_tanh.py` - FM vs DSM vs KDE-LOO comparison (tanh channel)
 
 ### Import Style
 
@@ -51,6 +54,12 @@ uv run python src/MI_sfblib.py
 
 # Nonlinear tanh channel: DSM vs KDE-LOO comparison
 uv run python src/MI_tanh.py
+
+# Flow Matching: identity channel verification (FM vs analytical)
+uv run python src/MI_fm_identity.py
+
+# Flow Matching: tanh channel (FM vs DSM vs KDE-LOO)
+uv run python src/MI_fm_tanh.py
 
 # Information gradient: reproduce paper Fig.3
 uv run python src/IG_sfblib_vjp.py
@@ -87,4 +96,6 @@ uv add --dev pytest
 
 - GPU is automatically used when available
 - The library supports both per-t DSM and noise-conditional DSM training schemes
+- Flow matching (FM) is available as an alternative to DSM: use `conditional="fm_noise_cond"` or `"fm_per_t"` in `estimate_mi_forward()`, with an `FMConfig`
+- FM learns a velocity field v(x_tau, tau) via CFM loss, then converts to score via `FlowMatchingScoreAdapter`
 - All MI values are in nats (natural logarithm)
